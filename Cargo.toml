@@ -50,17 +50,18 @@ rand = "0.8.5"
 getrandom = { version = "0.2", features = ["js"] }
 
 # Chaussette dependencies
-anyhow = "1.0.95"
 futures-util = "0.3.31"
 h2 = "0.4.7"
-tokio-quiche = "0.16.1"
+tokio-quiche = "0.6.0"
 tokio-util = { version = "0.7.13", features = ["io"] }
 
 # Ferret dependencies
+boring = "4.3"
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6.5"
 foundations = { git = "https://github.com/cloudflare/foundations.git", rev = "ff3d380", features = ["platform-common-default"] }
 hex = "0.4.3"
+hyper-boring = { version = "4.3", features = ["hyper1"] }
 tokio = { version = "1", features = ["full", "macros", "net", "rt"] }
 rustls = "0.23"
 rustls-native-certs = "0.8.3"
@@ -89,6 +90,7 @@ authors = ["Hannah Wang <hwang@cloudflare.com>"]
 publish = false
 
 [dependencies]
+boring = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true }
 color-eyre = { workspace = true }
@@ -98,6 +100,7 @@ tokio = { workspace = true }
 hex = { workspace = true }
 hpke = { workspace = true }
 hyper = { workspace = true }
+hyper-boring = { workspace = true }
 hyper-util = { workspace = true }
 hyper-rustls = { workspace = true }
 http = { workspace = true }
@@ -114,7 +117,6 @@ stream-octets = { workspace = true }
 ohttp-hpke = { workspace = true }
 hyper-binary = { workspace = true }
 
-anyhow = { workspace = true }
 futures-util = { workspace = true }
 http-body = { workspace = true }
 h2 = { workspace = true }
@@ -124,5 +126,6 @@ tokio-util = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 httpmock = { workspace = true }
+s2n-quic = "1.76.0"
 wiremock = { workspace = true }
 test-case = { workspace = true }

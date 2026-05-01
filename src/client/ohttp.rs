@@ -1,4 +1,4 @@
-use super::{HttpClient, HttpResponse};
+use super::{HttpClient, HttpResponse, RequestHandler, log_and_execute_request};
 use crate::{
     Http2Client,
     args::{Method, RequestArgs, TlsConfig},
@@ -40,9 +40,9 @@ impl HttpClient for OHttpClient {
             .wrap_err("Failed to encrypt inner request")?;
 
         let response = self
-            .dispatch_outer_request(bytes)
+            .send_outer_request(bytes)
             .await
-            .wrap_err("Failed to dispatch outer request")?;
+            .wrap_err("Failed to send outer request")?;
 
         self.decrypt(response, response_receiving_ctx)
             .await
@@ -144,7 +144,7 @@ impl OHttpClient {
         ))
     }
 
-    async fn dispatch_outer_request(&self, encrypted_request: Bytes) -> Result<HttpResponse> {
+    async fn send_outer_request(&self, encrypted_request: Bytes) -> Result<HttpResponse> {
         let proxy_url = match &self.first_hop_url {
             Some(first_hop) => {
                 log::info!("Using first hop URL to send outer request: {}", first_hop);
@@ -159,21 +159,18 @@ impl OHttpClient {
             }
         };
 
-        let outer_request = self
-            .proxy_http_client
-            .create_request(RequestArgs {
-                method: Method::Post,
-                url: proxy_url,
-                headers: vec!["Content-Type: message/ohttp-req".to_string()],
-                body: Some(encrypted_request),
-            })
-            .wrap_err("Failed to create outer OHTTP request with encapsulated inner request")?;
+        let outer_request = RequestHandler::create_request(RequestArgs {
+            method: Method::Post,
+            url: proxy_url,
+            headers: vec!["Content-Type: message/ohttp-req".to_string()],
+            body: Some(encrypted_request),
+        })
+        .wrap_err("Failed to create outer OHTTP request with encapsulated inner request")?;
 
-        let response = self
-            .proxy_http_client
-            .dispatch_request(outer_request)
-            .await
-            .wrap_err("Failed to dispatch outer OHTTP request")?;
+        let response =
+            log_and_execute_request(outer_request, |req| self.proxy_http_client.execute(req))
+                .await
+                .wrap_err("Failed to execute outer OHTTP request")?;
 
         log::info!(
             "Received response to outer request with status: {}",
@@ -200,10 +197,8 @@ impl OHttpClient {
         log::trace!("Response receiving context: {:?}", response_receiving_ctx);
 
         // the actual request you want to send through OHTTP
-        let inner_request = self
-            .proxy_http_client
-            .create_request(args)
-            .wrap_err("Failed to create inner request")?;
+        let inner_request =
+            RequestHandler::create_request(args).wrap_err("Failed to create inner request")?;
         let bhttp_encoded =
             encode_request(inner_request).wrap_err("Failed to encode inner request")?;
 

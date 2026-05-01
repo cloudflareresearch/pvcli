@@ -1,6 +1,8 @@
 use super::body::{BoxedBody, H3Body, send_hyper_body};
+use super::logging::H3ConnectionLogger;
 use bytes::Bytes;
-use foundations::telemetry::log;
+use color_eyre::eyre::{Result, eyre};
+use foundations::telemetry::settings::Level;
 use h2::ext::Protocol;
 use http::{Method, Request, Response, Version};
 use http_body::Body;
@@ -15,8 +17,8 @@ use tokio_quiche::http3::driver;
 use tokio_quiche::http3::driver::{ClientH3Event, H3Event, IncomingH3Headers, NewClientRequest};
 use tokio_quiche::http3::driver::{InboundFrameStream, OutboundFrameSender};
 use tokio_quiche::quic::{ConnectionShutdownBehaviour, QuicCommand};
-use tokio_quiche::quiche;
 use tokio_quiche::quiche::h3::{self, NameValue as _};
+use tokio_quiche::quiche::{self};
 use tokio_quiche::{BoxError, ClientH3Connection, QuicResult};
 use tokio_util::sync::CancellationToken;
 
@@ -96,19 +98,29 @@ impl Connection {
             select! {
                 biased;
                 req = self.h3_event_receiver.recv() => match req {
-                    Some(req) => self.handle_event(req).await?,
-                    None => return Ok(()), // The sender was dropped, implying connection was terminated
+                    Some(req) => {
+                        H3ConnectionLogger::log(Level::Trace, format!("Driver received H3 event: {:?}", req));
+                        self.handle_event(req).await?
+                    },
+                    None => {
+                        H3ConnectionLogger::log(Level::Info, "H3 Event channel closed");
+                        return Ok(())
+                    }
                 },
+
                 Some(request) = self.client_req_receiver.recv() => {
+                    H3ConnectionLogger::log(Level::Info, "Driver handling client request");
                     self.handle_client_req(request)?;
                 }
+
                 Some(shutdown_request) = self.client_shutdown_receiver.recv() => {
-                    log::debug!("Sending client-requested shutdown request={:?} to the H3 Controller", shutdown_request);
+                    H3ConnectionLogger::log(Level::Info, format!("Driver sending shutdown request={:?} to H3 controller", shutdown_request));
                     let h3_cmd_sender = self.quic_connection.h3_controller.cmd_sender();
                     let _ = h3_cmd_sender.send(QuicCommand::ConnectionClose(shutdown_request));
                     self.cancel_token.cancel();
                 }
                 () = self.cancel_token.cancelled() => {
+                    H3ConnectionLogger::log(Level::Info, "Driver cleaning up QUIC connection");
                     let _ = self.quic_connection.shutdown_connection().await;
                     return Ok(())
                 },
@@ -152,7 +164,7 @@ impl Connection {
             // Received connection settings
             H3Event::IncomingSettings { settings } => {
                 state.peer_settings.set(settings).map_err(|_| {
-                    anyhow::anyhow!("settings already set - received duplicate settings from peer")
+                    eyre!("settings already set - received duplicate settings from peer")
                 })?;
                 Ok(())
             }
@@ -168,19 +180,26 @@ impl Connection {
                     h3_audit_stats: _,
                 } = incoming_headers;
 
-                log::debug!(
-                    "got a response for stream_id={}, headers={:?}",
-                    stream_id,
-                    headers
-                );
-
                 let Some(request_id) = self.stream_id_to_request_id.remove(&stream_id) else {
-                    Err(format!("got headers for unknown stream_id={stream_id}"))?
+                    Err(format!(
+                        "Received headers for unknown stream_id={stream_id}"
+                    ))?
                 };
+
+                H3ConnectionLogger::log(
+                    Level::Debug,
+                    format!(
+                        "Received response for request_id={}, stream_id={}, headers={:?}",
+                        request_id, stream_id, headers
+                    ),
+                );
 
                 let Some(PendingRequest { response }) = self.pending_requests.remove(&request_id)
                 else {
-                    log::warn!("missing request_id={request_id}");
+                    H3ConnectionLogger::log(
+                        Level::Warning,
+                        format!("Missing request_id={}", request_id),
+                    );
                     return Ok(());
                 };
 
@@ -209,7 +228,7 @@ impl Connection {
 
     /// Receives a [ClientRequest] from the user-facing task and forwards it into the
     /// [Connection]'s underlying H3Driver for processing.
-    fn handle_client_req(&mut self, client_request: ClientRequest) -> anyhow::Result<()> {
+    fn handle_client_req(&mut self, client_request: ClientRequest) -> Result<()> {
         use std::sync::atomic::{AtomicU64, Ordering};
 
         static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
@@ -223,6 +242,13 @@ impl Connection {
         let headers = hyper_request_parts_to_h3_headers(parts);
 
         let has_body = body.size_hint().exact() != Some(0);
+        H3ConnectionLogger::log(
+            Level::Debug,
+            format!(
+                "Outbound request request_id={}, headers={:?}, has_body={:?}",
+                request_id, headers, has_body
+            ),
+        );
 
         let (body_writer_tx, body_writer_rx) = oneshot::channel();
         let body_writer = (is_connect || has_body).then_some(body_writer_tx);
@@ -233,7 +259,7 @@ impl Connection {
             headers,
             body_writer,
         }) {
-            return Err(anyhow::anyhow!(
+            return Err(eyre!(
                 "unable to send new client request to IO worker: {:?}",
                 e
             ));
@@ -249,7 +275,10 @@ impl Connection {
                         tokio::spawn(send_hyper_body(body, h3_body));
                     }
                     Err(e) => {
-                        log::error!("unable to get writer for client body: {:?}", e);
+                        H3ConnectionLogger::log(
+                            Level::Error,
+                            format!("Unable to get writer for client body: {:?}", e),
+                        );
                     }
                 }
             });

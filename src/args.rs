@@ -40,8 +40,16 @@ pub struct Args {
 
     /// path to CA certificate (PEM format) for TLS validation.
     /// If using --proxy, this is ignored. Use --proxy-cacert to specify a CA cert for the gateway when using OHTTP.
-    #[arg(long = "cacert")]
+    #[arg(long, conflicts_with = "proxy")]
     pub cacert: Option<String>,
+
+    /// Use http3 for the request instead of the default http2.
+    /// If used with --proxy, only the inner request will be http3.
+    /// This requires the outer request to be http3 as well, specified with [TODO] --proxy-http3.
+    #[arg(long)]
+    pub http3: bool,
+
+    /** PROXYING AND OHTTP */
 
     /// url to proxy for CONNECT or OHTTP
     #[arg(short = 'x', long)]
@@ -56,7 +64,7 @@ pub struct Args {
     pub config_path: String,
 
     /// path to CA certificate (PEM format) for validating the --proxy gateway's TLS certificate.
-    #[arg(long = "proxy-cacert")]
+    #[arg(long = "proxy-cacert", requires = "proxy")]
     pub proxy_cacert: Option<String>,
 
     /// boolean flag to use ohttp, requires a proxy (see --proxy)
@@ -64,7 +72,7 @@ pub struct Args {
     pub ohttp: bool,
 
     /// relay URL for OHTTP, if different from proxy URL
-    #[arg(long, requires = "ohttp")]
+    #[arg(long, requires = "proxy")]
     pub first_hop: Option<String>,
 }
 
@@ -78,6 +86,7 @@ impl Default for Args {
             header: vec![],
             data: None,
             cacert: None,
+            http3: false,
             proxy: None,
             gateway_path: "gateway".to_string(),
             config_path: "ohttp-config".to_string(),
@@ -106,7 +115,7 @@ impl Args {
     pub fn validate(&mut self) -> Result<()> {
         self.setup_args()?;
 
-        let warnings = [self.validate_basic()?, self.validate_ohttp()?].concat();
+        let warnings = [self.validate_basic()?, self.validate_proxy()?].concat();
         let active: Vec<_> = warnings.into_iter().filter(|(_, cond)| *cond).collect();
 
         if !active.is_empty() {
@@ -174,7 +183,7 @@ impl Args {
         Ok(warnings)
     }
 
-    fn validate_ohttp(&self) -> Result<Vec<(String, bool)>> {
+    fn validate_proxy(&self) -> Result<Vec<(String, bool)>> {
         let warnings: Vec<(String, bool)> = vec![
             (
                 "--cacert is not used with --ohttp (gateway handles target TLS). Did you mean --proxy-cacert?".to_string(),
@@ -184,6 +193,10 @@ impl Args {
                 "--proxy-cacert is not used without --ohttp or --proxy".to_string(),
                 self.proxy.is_none() && self.proxy_cacert.is_some(),
             ),
+            (
+                "--proxy paired with --http3 requires --proxy-http3 as we need the outer protocol to support http3 if the inner request is http3".to_string(),
+                self.http3 && self.proxy.is_some(),
+            )
         ];
         Ok(warnings)
     }

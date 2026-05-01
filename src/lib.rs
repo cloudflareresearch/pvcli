@@ -3,7 +3,7 @@ mod client;
 pub mod error;
 
 pub use args::{Args, Method};
-pub use client::{Http2Client, HttpClient, HttpClientKind, HttpResponse, OHttpClient};
+pub use client::{Http2Client, Http3Client, HttpClient, HttpClientKind, HttpResponse, OHttpClient};
 
 use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -43,16 +43,16 @@ pub async fn run_handle_error(args: Args) -> String {
 
 pub async fn run(mut args: Args) -> Result<String> {
     args.validate()?;
-    let client = select_http_client(&args)?;
+    let client = select_http_client(&args).await?;
     Ok(client
         .send_request(args.try_into()?)
         .await?
         .body_as_string_lossy())
 }
 
-fn select_http_client(args: &Args) -> Result<HttpClientKind> {
+async fn select_http_client(args: &Args) -> Result<HttpClientKind> {
     if args.ohttp {
-        Ok(HttpClientKind::OHttp(
+        return Ok(HttpClientKind::OHttp(
             OHttpClient::new(
                 args.proxy.clone(),
                 args.gateway_path.clone(),
@@ -61,14 +61,24 @@ fn select_http_client(args: &Args) -> Result<HttpClientKind> {
                 &args.proxy_tls_config(),
             )
             .wrap_err("OHTTP Client initialization error")?,
-        ))
-    } else if let Some(_proxy_url) = &args.proxy {
-        Err(eyre!("CONNECT proxying not implemented yet"))
-    } else {
-        Ok(HttpClientKind::Http2(
-            Http2Client::new(&args.tls_config()).wrap_err("HTTP/2 Client initialization error")?,
-        ))
+        ));
     }
+
+    if let Some(_proxy_url) = &args.proxy {
+        return Err(eyre!("CONNECT proxying not implemented yet"));
+    }
+
+    if args.http3 {
+        return Ok(HttpClientKind::Http3(
+            Http3Client::new(args.url.clone())
+                .await
+                .wrap_err("HTTP/3 Client initialization error")?,
+        ));
+    }
+
+    Ok(HttpClientKind::Http2(
+        Http2Client::new(&args.tls_config()).wrap_err("HTTP/2 Client initialization error")?,
+    ))
 }
 
 fn configure_logging(args: &Args) -> BootstrapResult<TelemetryDriver> {
@@ -109,6 +119,7 @@ mod unit_tests {
     #[test_case(&["ferret", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "http2 post without header")]
     #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "user-agent" ; "ohttp without header")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
+    #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com"], false, "support http3" ; "http3 with proxy requires proxy-http3")]
     fn test_args_validation(case: &[&str], expect_pass: bool, expected_contain: &str) {
         let mut args = Args::parse_from(case);
         let result = args.validate();

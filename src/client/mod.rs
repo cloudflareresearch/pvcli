@@ -1,22 +1,27 @@
 mod http2;
 mod http3;
 mod ohttp;
+mod request;
 
 pub use http2::Http2Client;
+pub use http3::Http3Client;
 pub use ohttp::OHttpClient;
+pub use request::RequestHandler;
 
 use crate::args::RequestArgs;
 use bytes::Bytes;
-use color_eyre::eyre::{Report, Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr};
 use foundations::telemetry::log;
+use http::Request;
 use http_body_util::combinators::BoxBody;
 use hyper::HeaderMap;
 
-type Body = BoxBody<Bytes, Report>;
+type HttpBody = BoxBody<Bytes, std::io::Error>;
 
 pub enum HttpClientKind {
     OHttp(OHttpClient),
     Http2(Http2Client),
+    Http3(Http3Client),
 }
 
 #[allow(async_fn_in_trait)]
@@ -35,8 +40,32 @@ impl HttpClient for HttpClientKind {
                 .send_request(req)
                 .await
                 .wrap_err("HTTP/2 Client failed to send request"),
+            Self::Http3(c) => c
+                .send_request(req)
+                .await
+                .wrap_err("HTTP/3 Client failed to send request"),
         }
     }
+}
+
+pub async fn log_and_execute_request<F, Fut>(
+    request: Request<HttpBody>,
+    execute_fn: F,
+) -> Result<HttpResponse>
+where
+    F: FnOnce(Request<HttpBody>) -> Fut,
+    Fut: Future<Output = Result<HttpResponse>>,
+{
+    log::trace!("Full request details: {:?}", request);
+
+    let request_uri = request.uri().to_string();
+    let http_response: HttpResponse = execute_fn(request)
+        .await
+        .wrap_err(format!("Failed to dispatch request to {}", request_uri))?;
+
+    log::info!("Successfully received response from {}", request_uri);
+    http_response.log_response();
+    Ok(http_response)
 }
 
 #[derive(Debug, Clone)]
@@ -79,15 +108,12 @@ impl HttpResponse {
             self.version
         );
         log::info!("Response Headers: {:?}", self.headers);
-        log::debug!(
-            "Response Body, use -vvv for hex output ({} bytes): {}",
+        log::info!(
+            "Response body, use -vvv for HEX/escaped output ({} bytes): {}",
             self.body.len(),
-            self.body_as_string_escaped()
+            self.body_as_string_lossy()
         );
-        log::trace!(
-            "Response body ({} bytes) [HEX]: {}",
-            self.body.len(),
-            self.body_as_hex()
-        );
+        log::debug!("Response Body [HEX]: {}", self.body_as_hex());
+        log::trace!("Response body [ESCAPED]: {}", self.body_as_string_escaped());
     }
 }

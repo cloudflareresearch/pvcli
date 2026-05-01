@@ -5,10 +5,10 @@ use ferret::{Args, Method, run};
 use std::sync::LazyLock;
 use test_case::test_case;
 
-static MOCK_SERVER: LazyLock<MockH2Server> = LazyLock::new(MockH2Server::new);
+static MOCK_H2_SERVER: LazyLock<MockH2Server> = LazyLock::new(MockH2Server::new);
 
 fn get_mock_server_url() -> String {
-    MOCK_SERVER.url()
+    MOCK_H2_SERVER.url()
 }
 
 async fn run_and_match(args: Args, expected_result: &str) {
@@ -40,7 +40,7 @@ async fn test_http2_success(args: Args, expected_result: &str) {
 
 #[test_case(Args {url: format!("{}/testget", get_mock_server_url()), method: Some(Method::Get), data: Some("data".into()), ..Default::default()}, "validation failed" ; "get with data")]
 #[test_case(Args {url: format!("{}/invalid", get_mock_server_url()), ..Default::default()}, "Request did not match any route" ; "get invalid path")]
-#[test_case(Args {url: "https://invalid.com".into(), ..Default::default()}, "Failed to dispatch request" ; "invalid url fails")]
+#[test_case(Args {url: "https://invalid.com".into(), ..Default::default()}, "Failed to send request" ; "invalid url fails")]
 #[test_case(Args {url: "".into(), ..Default::default()}, "validation failed" ; "empty url fails")]
 #[test_case(Args {url: format!("{}/testget", get_mock_server_url()), cacert: Some("./nonexistent.pem".into()), ..Default::default()}, "failed to open" ; "invalid cacert fails")]
 #[tokio::test]
