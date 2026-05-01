@@ -28,7 +28,7 @@ pub struct Args {
     pub method: Option<Method>,
 
     #[arg(short = 'H', long)]
-    pub header: Option<Vec<String>>,
+    pub header: Vec<String>,
 
     #[arg(short, long, value_parser = parse_data)]
     /// ferret uses "Content-Type: application/x-www-form-urlencoded" by default. See --header to customize
@@ -58,11 +58,11 @@ impl Default for Args {
             verbosity: 0,
             silent: false,
             method: None,
-            header: None,
+            header: vec![],
             data: None,
             proxy: None,
-            gateway_path: "/gateway".to_string(),
-            config_path: "/ohttp-config".to_string(),
+            gateway_path: "gateway".to_string(),
+            config_path: "ohttp-config".to_string(),
             ohttp: false,
         }
     }
@@ -70,6 +70,23 @@ impl Default for Args {
 
 impl Args {
     pub fn validate(&mut self) -> Result<()> {
+        if !self
+            .header
+            .iter()
+            .any(|h| h.to_ascii_lowercase().contains("user-agent"))
+        {
+            let user_agent_header = format!(
+                "User-Agent:{}/{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION")
+            );
+            self.header.push(user_agent_header);
+        }
+
+        if self.url.is_empty() {
+            return Err(FerretError::InvalidArg("URL is required".to_string()));
+        }
+
         let method = self.method.unwrap_or(if self.data.is_none() {
             Method::Get
         } else {
@@ -78,39 +95,31 @@ impl Args {
         self.method = Some(method);
 
         if method == Method::Get && self.data.is_some() {
+            // curl allows data with GET
             log::warn!("data argument (-d, --data) provided for GET request");
         }
-        if method == Method::Post {
-            if self.data.is_none() {
-                return Err(FerretError::InvalidArg(
-                    "no data argument (-d, --data) provided for POST request".to_string(),
-                ));
-            }
+        if method == Method::Post && self.data.is_none() {
+            return Err(FerretError::InvalidArg(
+                "no data argument (-d, --data) provided for POST request".to_string(),
+            ));
         }
 
         // Standard content types for different types of requests
-        if self.header.as_ref().is_none_or(|headers| {
-            !headers
+        if method == Method::Post
+            && !self
+                .header
                 .iter()
                 .any(|h| h.to_ascii_lowercase().contains("content-type"))
-        }) {
-            let default_content_type = if self.ohttp {
-                "Content-Type:message/ohttp-req".to_string()
-            } else {
-                "Content-Type:application/x-www-form-urlencoded".to_string()
-            };
-
-            log::info!(
+        {
+            let default_content_type = "Content-Type:application/x-www-form-urlencoded".to_string();
+            log::debug!(
                 "Header (-H, --header) does not contain \"Content-Type\", defaulting to {}",
                 default_content_type,
             );
-
-            self.header
-                .get_or_insert(Vec::new())
-                .push(default_content_type);
+            self.header.push(default_content_type);
         }
 
-        log::debug!("{:?}", self);
+        log::debug!("Validated args: {:?}", self);
 
         Ok(())
     }
@@ -132,7 +141,7 @@ impl TryFrom<Args> for RequestArgs {
                 FerretError::InvalidArg("No method provided for RequestArgs conversion".to_string())
             })?,
             url: args.url,
-            headers: args.header.unwrap_or_default(),
+            headers: args.header,
             body: args.data.map(Bytes::from),
         })
     }
@@ -140,7 +149,7 @@ impl TryFrom<Args> for RequestArgs {
 
 fn parse_data(d: &str) -> std::result::Result<String, String> {
     if let Some(path) = d.strip_prefix("@") {
-        Ok(fs::read_to_string(path).expect("failed to read from file"))
+        fs::read_to_string(path).map_err(|e| format!("failed to read file '{}': {}", path, e))
     } else {
         Ok(d.to_string())
     }

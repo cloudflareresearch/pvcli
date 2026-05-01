@@ -38,10 +38,10 @@ pub async fn run_handle_error(args: Args) -> String {
 pub async fn run(mut args: Args) -> Result<String> {
     args.validate()?;
     let client = select_http_client(&args)?;
-    client
+    Ok(client
         .send_request(args.try_into()?)
         .await?
-        .body_as_string_lossy()
+        .body_as_string_lossy())
 }
 
 fn select_http_client(args: &Args) -> Result<HttpClientKind> {
@@ -65,17 +65,15 @@ fn configure_logging(args: &Args) -> BootstrapResult<TelemetryDriver> {
     let mut settings = TelemetrySettings::default();
     settings.logging.output = LogOutput::Stderr;
 
-    settings.logging.verbosity = match args.verbosity {
-        0_u8 => LogVerbosity::Warning,
-        1_u8 => LogVerbosity::Info,
-        2_u8 => LogVerbosity::Debug,
-        _ => LogVerbosity::Trace,
-    };
-
-    // takes priority over verbosity
-    settings.logging.verbosity = match args.silent {
-        true => LogVerbosity::Critical,
-        false => settings.logging.verbosity,
+    settings.logging.verbosity = if args.silent {
+        LogVerbosity::Critical
+    } else {
+        match args.verbosity {
+            0 => LogVerbosity::Warning,
+            1 => LogVerbosity::Info,
+            2 => LogVerbosity::Debug,
+            _ => LogVerbosity::Trace,
+        }
     };
 
     settings.logging.format = LogFormat::Text;
@@ -97,8 +95,8 @@ mod unit_tests {
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata"], true, "post" ; "default post")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "@./tests/testdata.txt"], true, "hello world" ; "post data with filepath")]
     #[test_case(&["ferret", "https://test_url.com", "-X", "post"], false, "" ; "post without data")]
-    #[test_case(&["ferret", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "http2 without header")]
-    #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "message/ohttp-req" ; "ohttp without header")]
+    #[test_case(&["ferret", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "http2 post without header")]
+    #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "user-agent" ; "ohttp without header")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
     fn test_args_validation(case: &[&str], expect_pass: bool, expected_contain: &str) {
         let mut args = Args::parse_from(case);
@@ -108,7 +106,12 @@ mod unit_tests {
             assert!(result.is_ok(), "result should be Ok()");
             let all_fields =
                 format!("{:?} {:?} {:?}", args.method, args.header, args.data).to_lowercase();
-            assert!(all_fields.contains(expected_contain));
+            assert!(
+                all_fields.contains(expected_contain),
+                "expected fields {:?} to contain '{}'",
+                all_fields,
+                expected_contain
+            );
         } else {
             assert!(result.is_err(), "should have failed");
         }

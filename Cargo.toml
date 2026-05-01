@@ -81,9 +81,11 @@ publish = false
 [dependencies]
 clap = { workspace = true }
 foundations = { workspace = true }
+futures = { workspace = true }
 httpmock = { workspace = true }
 tokio = { workspace = true }
 hex = { workspace = true }
+hpke = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 hyper-rustls = { workspace = true }

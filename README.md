@@ -22,12 +22,21 @@ This should build and run the gateway at http://localhost:8787
 
 ## Examples
 
-Use -v for INFO logs and -vv for DEBUG logging. -s for silent
+Use -v for INFO logs, -vv for DEBUG, and -vvv for TRACE.
+See -h, --help for more options.
 
 ### Basic HTTP2 query
 
 ```
 $ cargo run --bin ferret -- https://example.com
+```
+
+### Basic OHTTP query to local ohttp-gateway-worker booted up with `npx wrangler dev`
+
+This tests basic proxying and HPKE encapsulation.
+
+```
+$ cargo run --bin ferret -- --ohttp -x http://localhost:8787 https://example.com
 ```
 
 ## License

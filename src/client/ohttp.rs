@@ -6,26 +6,33 @@ use crate::{
 };
 use bytes::Bytes;
 use foundations::telemetry::log;
+use futures::TryStreamExt;
 use hex;
-use ohttp_hpke::client::{ClientConfig, EncapConfig, ResponseReceivingContext, decode_config};
+use http_body_util::BodyExt;
+use hyper_binary::{decode_response, encode_request};
+use ohttp_hpke::client::{
+    ClientConfig, EncapConfig, ResponseReceivingContext, decode_config, setup_request_encapsulation,
+};
 use stream_buf::{EmptyStreamBuf, StreamBuf};
+
+const MESSAGE_BHTTP_REQUEST: &str = "message/bhttp request";
+const MESSAGE_BHTTP_RESPONSE: &str = "message/bhttp response";
 
 pub struct OHttpClient {
     proxy_http_client: Http2Client,
     proxy_config_url: String,
-    _proxy_gateway_url: String,
+    proxy_gateway_url: String,
 }
 
 impl HttpClient for OHttpClient {
-    async fn send_request(&self, _args: RequestArgs) -> Result<HttpResponse> {
-        let (_encap_config, hex_key_response) = self.fetch_proxy_key().await?;
-        Ok(hex_key_response)
+    async fn send_request(&self, args: RequestArgs) -> Result<HttpResponse> {
+        let (encap_config, _hex_key_response) = self.fetch_proxy_key().await?;
 
-        // self.encrypt().await?;
+        let (bytes, response_receiving_ctx) = self.encrypt(args, encap_config).await?;
 
-        // self.create_ohttp_request().await?;
+        let response = self.dispatch_outer_request(bytes).await?;
 
-        // self.decrypt().await
+        self.decrypt(response, response_receiving_ctx).await
     }
 }
 
@@ -55,11 +62,13 @@ impl OHttpClient {
         Ok(Self {
             proxy_http_client: Http2Client::new()?,
             proxy_config_url: key_config_url,
-            _proxy_gateway_url: gateway_url,
+            proxy_gateway_url: gateway_url,
         })
     }
 
     async fn fetch_proxy_key(&self) -> Result<(EncapConfig, HttpResponse)> {
+        log::info!("Fetching OHTTP key configuration, use -vvv to debug the raw response body");
+
         let proxy_args = RequestArgs {
             method: Method::Get,
             url: self.proxy_config_url.clone(),
@@ -67,15 +76,16 @@ impl OHttpClient {
             body: None,
         };
 
-        log::debug!("Fetching key from OHTTP proxy client: {:?}", proxy_args);
+        log::trace!("Key request args: {:?}", proxy_args);
 
         let response = self.proxy_http_client.send_request(proxy_args).await?;
-
         if response.status != 200 {
-            log::debug!(
-                "Key Response (String): {}",
-                response.body_as_string_escaped()?
+            log::error!(
+                "OHTTP Key at {} responded with non-200 status, use -vvv to debug raw response body: {}",
+                self.proxy_config_url,
+                response.status,
             );
+
             return Err(FerretError::UnexpectedStatus {
                 status: response.status,
                 message: format!(
@@ -84,46 +94,149 @@ impl OHttpClient {
                 ),
             });
         }
+        log::trace!("Raw key response: {:?}", response.body);
 
         let hex_key = hex::encode(response.body.as_ref());
         log::info!(
-            "Successfully queried OHTTP key directory (HEX): {}",
+            "Successfully queried OHTTP key directory ({} bytes) [HEX]: {}",
+            hex_key.len() / 2,
             hex_key
         );
 
+        log::debug!("Decoded client config, extracting encapsulation config");
         let mut stream_buf: EmptyStreamBuf<FerretError> = StreamBuf::from(response.body);
         let client_config: ClientConfig = decode_config(&mut stream_buf).await?;
         let encap_config = client_config.first_encap_config(); // likely preferred config
-        log::info!(
-            "Successfully extracted encapsulated config key: {:?}",
-            encap_config
-        );
+        log::info!("Successfully extracted encapsulated config key");
+        log::trace!("Encapsulated config key: {:?}", encap_config);
 
         Ok((
             encap_config,
             HttpResponse {
+                version: response.version,
                 status: 200,
+                headers: response.headers,
                 body: Bytes::from(hex_key),
             },
         ))
     }
 
-    async fn _create_ohttp_request(&self) -> Result<()> {
-        Err(FerretError::Todo(
-            "OHTTP request creation not implemented yet".to_string(),
-        ))
+    async fn dispatch_outer_request(&self, encrypted_request: Bytes) -> Result<HttpResponse> {
+        log::info!(
+            "Sending encapsulated request to gateway: {}",
+            self.proxy_gateway_url
+        );
+
+        let outer_request = self.proxy_http_client.create_request(RequestArgs {
+            method: Method::Post,
+            url: self.proxy_gateway_url.clone(),
+            headers: vec!["Content-Type: message/ohttp-req".to_string()],
+            body: Some(encrypted_request),
+        })?;
+
+        self.proxy_http_client.dispatch_request(outer_request).await
     }
 
-    async fn _encrypt(&self) -> Result<(Bytes, ResponseReceivingContext)> {
-        Err(FerretError::Todo(
-            "OHTTP request encryption not implemented yet".to_string(),
-        ))
+    async fn encrypt(
+        &self,
+        args: RequestArgs,
+        encap_config: EncapConfig,
+    ) -> Result<(Bytes, ResponseReceivingContext)> {
+        log::info!("Starting OHTTP encryption process, use -vvv to debug raw bytes at each step");
+        let (request_sending_ctx, response_receiving_ctx) = setup_request_encapsulation(
+            encap_config,
+            MESSAGE_BHTTP_REQUEST,
+            MESSAGE_BHTTP_RESPONSE,
+        )?;
+        log::trace!("Request sending context: {:?}", request_sending_ctx);
+        log::trace!("Response receiving context: {:?}", response_receiving_ctx);
+
+        // the actual request you want to send through OHTTP
+        log::trace!("BHTTP encoding inner request");
+        let inner_request = self.proxy_http_client.create_request(args)?;
+        let bhttp_encoded = encode_request(inner_request)?;
+
+        log::trace!("Starting BHTTP byte collection");
+        let bhttp_bytes: Bytes = bhttp_encoded
+            .map_err(|e| FerretError::OhttpError(format!("BHTTP encoding error: {}", e)))
+            .try_collect::<Vec<Bytes>>()
+            .await?
+            .concat()
+            .into();
+
+        log::trace!(
+            "BHTTP encoded request bytes ({} bytes) [HEX]: {}",
+            bhttp_bytes.len(),
+            hex::encode(bhttp_bytes.as_ref())
+        );
+
+        log::trace!("Encapsulating inner request");
+        let bhttp_stream: EmptyStreamBuf<FerretError> = StreamBuf::from(bhttp_bytes);
+        let encapsulated_stream = request_sending_ctx.encapsulate_non_chunked_content(bhttp_stream);
+
+        log::trace!("Starting encrypted byte collection");
+        let encrypted_request: Bytes = encapsulated_stream
+            .try_collect::<Vec<Bytes>>()
+            .await?
+            .concat()
+            .into();
+
+        log::trace!(
+            "Encrypted request bytes ({} bytes) [HEX]: {}",
+            encrypted_request.len(),
+            hex::encode(encrypted_request.as_ref())
+        );
+
+        log::info!("Successfully encapsulated request with HPKE");
+
+        Ok((encrypted_request, response_receiving_ctx))
     }
 
-    async fn _decrypt(&self) -> Result<HttpResponse> {
-        Err(FerretError::Todo(
-            "OHTTP response decryption not implemented yet".to_string(),
-        ))
+    async fn decrypt(
+        &self,
+        response: HttpResponse,
+        response_receiving_ctx: ResponseReceivingContext,
+    ) -> Result<HttpResponse> {
+        log::info!("Decrypting OHTTP response, use -vvv to debug raw bytes at each step");
+        if response.status != 200 {
+            return Err(FerretError::UnexpectedStatus {
+                status: response.status,
+                message: format!(
+                    "Gateway returned error status {}: {}",
+                    response.status,
+                    response.body_as_string_escaped()
+                ),
+            });
+        }
+
+        log::trace!("Decapsulating response");
+        let mut response_buf: EmptyStreamBuf<FerretError> = StreamBuf::from(response.body);
+
+        let decrypted_bhttp = response_receiving_ctx
+            .decapsulate_non_chunked_content(&mut response_buf)
+            .await?;
+
+        log::trace!(
+            "Decrypted BHTTP ({} bytes) [HEX]: {}",
+            decrypted_bhttp.len(),
+            hex::encode(decrypted_bhttp.as_ref())
+        );
+
+        log::trace!("Decoding BHTTP response");
+        let decrypted_buf: EmptyStreamBuf<FerretError> = StreamBuf::from(decrypted_bhttp);
+        let bhttp_decoded = decode_response(decrypted_buf).await?;
+
+        let http_response = HttpResponse {
+            version: bhttp_decoded.version(),
+            status: bhttp_decoded.status().as_u16(),
+            headers: bhttp_decoded.headers().clone(),
+            body: bhttp_decoded.into_body().collect().await?.to_bytes(),
+        };
+
+        log::info!("Successfully decrypted OHTTP response");
+        http_response.log_response();
+
+        Ok(http_response)
     }
 }
 
@@ -164,7 +277,7 @@ mod unit_tests {
 
         match result {
             Ok((_, http_response)) => assert_eq!(
-                http_response.body_as_string_lossy().unwrap(),
+                http_response.body_as_string_lossy(),
                 expected_result,
                 "expected identical mock hex key"
             ),

@@ -37,101 +37,80 @@ impl Http2Client {
             // .http2_only(true) // --http2 flag to force this
             .build(https);
 
-        log::debug!("Successfully initialized HTTP2 Client");
+        log::trace!("Successfully initialized HTTP2 Client");
         Ok(Self { client })
     }
 
-    fn get(&self, args: RequestArgs) -> Result<Request<Body>> {
-        let headers: Vec<String> = args.headers;
-        let url = args.url;
-
-        log::info!("GET: Creating Http2Client request to {}", url);
-        let uri = url.parse::<hyper::Uri>()?;
-
-        log::debug!(
-            "Parsed URI - scheme: {:?}, host: {:?}, path: {}",
-            uri.scheme_str(),
-            uri.host(),
-            uri.path()
-        );
-
-        let builder = Request::builder().method("GET").uri(&uri);
-        let request = self
-            .consume_headers(builder, headers)?
-            .body(BoxBody::new(Empty::<Bytes>::new().map_err(|e| match e {})))
-            .expect("failed to build request");
-
-        log::debug!("Request built: {:?}", request);
-
-        Ok(request)
-    }
-
-    fn post(&self, args: RequestArgs) -> Result<Request<Body>> {
-        let body = args.body.ok_or(FerretError::InvalidArg(
-            "POST request requires a body".into(),
-        ))?;
-        let url = args.url;
-        let headers: Vec<String> = args.headers;
-
-        log::info!("POST: Creating Http2Client request to {}", url);
-        let uri = url.parse::<hyper::Uri>()?;
-
-        log::debug!(
-            "Parsed URI - scheme: {:?}, host: {:?}, path: {}",
-            uri.scheme_str(),
-            uri.host(),
-            uri.path()
-        );
-
-        let builder = Request::builder().method("POST").uri(&uri);
-        let request = self
-            .consume_headers(builder, headers)?
-            .body(BoxBody::new(Full::new(body).map_err(|e| match e {})))
-            .expect("failed to build request");
-
-        log::debug!("Request built: {:?}", request);
-
-        Ok(request)
-    }
-
     pub fn create_request(&self, args: RequestArgs) -> Result<Request<Body>> {
-        let request = match args.method {
-            Method::Get => self.get(args)?,
-            Method::Post => self.post(args)?,
+        match args.method {
+            Method::Get => self.build_request("GET", args.url, args.headers, None),
+            Method::Post => {
+                let body = args.body.ok_or(FerretError::InvalidArg(
+                    "POST request requires a body".into(),
+                ))?;
+                self.build_request("POST", args.url, args.headers, Some(body))
+            }
+        }
+    }
+
+    fn build_request(
+        &self,
+        method: &str,
+        url: String,
+        headers: Vec<String>,
+        body: Option<Bytes>,
+    ) -> Result<Request<Body>> {
+        log::info!("Creating {} request to {}", method, url);
+
+        let uri = url.parse::<hyper::Uri>()?;
+
+        log::trace!(
+            "Parsed URI - scheme: {:?}, host: {:?}, path: {}",
+            uri.scheme_str(),
+            uri.host(),
+            uri.path()
+        );
+
+        let builder = Request::builder().method(method).uri(&uri);
+        let builder = self.consume_headers(builder, headers)?;
+
+        let body: Body = match body {
+            Some(b) => BoxBody::new(Full::new(b).map_err(|_| unreachable!())),
+            None => BoxBody::new(Empty::<Bytes>::new().map_err(|_| unreachable!())),
         };
 
+        let request = builder.body(body).expect("failed to build request");
+        log::trace!("Request built: {:?}", request);
         Ok(request)
     }
 
     pub async fn dispatch_request(&self, request: Request<Body>) -> Result<HttpResponse> {
-        log::info!("Sending request: {:?}", request);
+        log::debug!("Dispatching request to {:?}", request.uri());
+        log::trace!("Full request details: {:?}", request);
 
-        let response: Response<Incoming> = self.client.request(request).await.map_err(|e| {
-            log::error!("Request failed: {:?}", e);
-            FerretError::ClientError(e)
-        })?;
+        let response: Response<Incoming> = self
+            .client
+            .request(request)
+            .await
+            .map_err(FerretError::ClientError)?;
 
-        let status = response.status().as_u16();
-        let headers = response.headers().clone();
+        let http_response = HttpResponse {
+            version: response.version(),
+            status: response.status().as_u16(),
+            headers: response.headers().clone(),
+            body: response.into_body().collect().await?.to_bytes(),
+        };
 
-        log::info!("Response version: {:?}", response.version());
-        log::info!("Response Status: {}", status);
-        log::info!("Response Headers: {:?}", headers);
+        log::info!("Successfully received response");
+        http_response.log_response();
 
-        let body = response.into_body().collect().await?.to_bytes(); // TODO: ? stream for bigger response sizes
-        log::debug!("Body length: {} bytes", body.len());
-
-        Ok(HttpResponse { status, body })
+        Ok(http_response)
     }
 
     fn consume_headers(&self, mut builder: Builder, headers: Vec<String>) -> Result<Builder> {
         for h in &headers {
             if let Some((key, header)) = h.split_once(":") {
-                log::debug!(
-                    "Adding header - key: '{}', value: '{}'",
-                    key.trim(),
-                    header.trim()
-                );
+                log::trace!("Adding header: {}: {}", key.trim(), header.trim());
                 builder = builder.header(
                     http::header::HeaderName::from_bytes(key.trim().as_bytes())
                         .map_err(|e| FerretError::InvalidArg(format!("bad header name: {e}")))?,
@@ -139,10 +118,11 @@ impl Http2Client {
                         .map_err(|e| FerretError::InvalidArg(format!("bad header value: {e}")))?,
                 );
             } else {
+                // match curl behavior: warn but continue without malformed header
                 log::warn!("Invalid header format: {}", h);
             }
         }
-        log::info!("Successfully added headers: {:?}", builder.headers_ref());
+        log::debug!("Headers configured: {:?}", builder.headers_ref());
         Ok(builder)
     }
 }

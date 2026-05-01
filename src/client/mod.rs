@@ -7,7 +7,9 @@ pub use ohttp::OHttpClient;
 use crate::args::RequestArgs;
 use crate::error::Result;
 use bytes::Bytes;
+use foundations::telemetry::log;
 use http_body_util::combinators::BoxBody;
+use hyper::HeaderMap;
 
 type Body = BoxBody<Bytes, hyper::Error>;
 
@@ -32,26 +34,53 @@ impl HttpClient for HttpClientKind {
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
+    pub version: http::Version,
     pub status: u16,
+    pub headers: HeaderMap,
     pub body: Bytes,
 }
 
 impl HttpResponse {
-    pub fn body_as_string_lossy(&self) -> Result<String> {
-        Ok(String::from_utf8_lossy(&self.body).to_string())
+    // For final user-friendly output
+    pub fn body_as_string_lossy(&self) -> String {
+        String::from_utf8_lossy(&self.body).to_string()
     }
-    pub fn body_as_string_escaped(&self) -> Result<String> {
-        Ok(self
-            .body
+
+    // For logging/debugging: attempt to display body as UTF-8 string, but escape non-printable characters (e.g. binary data) to prevent logs from getting messed up
+    pub fn body_as_string_escaped(&self) -> String {
+        self.body
             .iter()
             .map(|&b| {
-                // all readable ascii + space, else hex escape (prevents random tabs/newlines from messing up logs)
                 if b.is_ascii_graphic() || b == b' ' {
                     (b as char).to_string()
                 } else {
                     format!("\\x{:02x}", b)
                 }
             })
-            .collect())
+            .collect()
+    }
+
+    // Standard hex output, common for cryptographic outputs and debugging
+    pub fn body_as_hex(&self) -> String {
+        hex::encode(&self.body)
+    }
+
+    pub fn log_response(&self) {
+        log::info!(
+            "Response status: {}, version: {:?}",
+            self.status,
+            self.version
+        );
+        log::info!("Response Headers: {:?}", self.headers);
+        log::debug!(
+            "Response Body, use -vvv for hex output ({} bytes): {}",
+            self.body.len(),
+            self.body_as_string_escaped()
+        );
+        log::trace!(
+            "Response body ({} bytes) [HEX]: {}",
+            self.body.len(),
+            self.body_as_hex()
+        );
     }
 }

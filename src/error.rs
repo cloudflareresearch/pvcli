@@ -28,9 +28,25 @@ pub enum FerretError {
     #[error("TLS Certificate error: {0}")]
     CertificateError(String),
 
+    #[error("TLS error: {0}")]
+    TlsError(#[from] rustls::Error),
+
+    // OHTTP
+    #[error("HPKE error: {0}")]
+    HpkeError(String),
+
+    #[error("OHTTP error: {0}")]
+    OhttpError(String),
+
     // response validation
     #[error("unexpected status {status}: {message}")]
     UnexpectedStatus { status: u16, message: String },
+}
+
+impl From<hpke::HpkeError> for FerretError {
+    fn from(e: hpke::HpkeError) -> Self {
+        FerretError::HpkeError(format!("{:?}", e))
+    }
 }
 
 impl From<rustls_pemfile::Error> for FerretError {
