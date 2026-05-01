@@ -1,26 +1,95 @@
+[workspace]
+members = [
+  ".",
+  "ohttp-gateway-worker",
+  "ohttp-gateway-worker/hyper-binary",
+  "ohttp-gateway-worker/ohttp-hpke",
+  "ohttp-gateway-worker/stream-buf",
+  "ohttp-gateway-worker/stream-octets",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Akshat Mahajan <akshat@cloudflare.com>"]
+publish = false
+
+[workspace.dependencies]
+# Shared dependencies
+bytes = "1.6"
+futures = "0.3.31"
+futures-core = "0.3.31"
+http = "1.4.0"
+http-body = "1.0.1"
+http-body-util = "0.1.3"
+octets = "0.3"
+
+# Worker-specific
+worker = { version = "0.7", features = ["http"] }
+worker-macros = { version = "0.7", features = ["http"] }
+reqwest = "0.13.1"
+js-sys = "0.3.83"
+wasm-bindgen = "0.2.106"
+wasm-bindgen-futures = "0.4.56"
+web-sys = "0.3.83"
+
+# Hyper ecosystem
+hyper = { version = "1.8.1", features = ["client", "http2"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
+hyper-rustls = { version = "0.27", features = ["http2"] }
+
+# Crypto dependencies
+aead = "0.5.2"
+generic-array = "=0.14.7"
+aes-gcm = "0.10.3"
+chacha20poly1305 = "0.10.1"
+hkdf = "0.12.4"
+hpke = { version = "0.11", default-features = false, features = ["x25519", "p256", "p384"] }
+sha2 = "0.10.8"
+rand = "0.8.5"
+getrandom = { version = "0.2", features = ["js"] }
+
+# Ferret deps
+clap = { version = "4", features = ["derive"] }
+foundations = { git = "https://github.com/cloudflare/foundations.git", rev = "ff3d380", features = ["platform-common-default"] }
+httpmock = "0.8.3"
+tokio = { version = "1", features = ["full", "macros", "net", "rt"] }
+rustls = "0.23"
+thiserror = "1"
+url = "2"
+
+# Dev dependencies
+wiremock = "0.6"
+test-case = "3"
+
+# Workspace crates
+stream-buf = { path = "./ohttp-gateway-worker/stream-buf" }
+stream-octets = { path = "./ohttp-gateway-worker/stream-octets" }
+ohttp-hpke = { path = "./ohttp-gateway-worker/ohttp-hpke" }
+hyper-binary = { path = "./ohttp-gateway-worker/hyper-binary" }
+
 [package]
 name = "ferret"
 version = "0.1.0"
 edition = "2024"
+authors = ["Hannah Wang <hwang@cloudflare.com>"]
+publish = false
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-foundations = { version = "5.4.0", features = ["platform-common-default"] }
-tokio = { version = "1", features = ["full"] }
-hyper = { version = "1", features = ["client", "http2"] }
-hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
-hyper-rustls = { version = "0.27", features = ["http2"] }
-http = "1.4.0"
-httpmock = "0.8.3"
-http-body-util = "0.1"
-rustls = "0.23"
-thiserror = "1"
-url = "2"
-bytes = "1"
+clap = { workspace = true }
+foundations = { workspace = true }
+httpmock = { workspace = true }
+tokio = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+hyper-rustls = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+rustls = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+bytes = { workspace = true }
 
 [dev-dependencies]
-wiremock = "0.6"
-test-case = "3"
-
-[patch.crates-io]
-foundations = { git = "https://github.com/AkshatM/foundations.git", branch = "main" }
+wiremock = { workspace = true }
+test-case = { workspace = true }

@@ -1,0 +1,6 @@
+name = "ohttp-gateway-worker"
+main = "build/index.js"
+compatibility_date = "2026-01-03"
+
+[build]
+command = "cargo install -q worker-build@^0.7 && worker-build --release"

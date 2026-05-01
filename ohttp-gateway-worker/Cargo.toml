@@ -1,0 +1,38 @@
+[package]
+name = "ohttp-gateway-worker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worker = { workspace = true }
+worker-macros = { workspace = true }
+http = { workspace = true }
+stream-buf = { workspace = true }
+ohttp-hpke = { workspace = true }
+hyper-binary = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+futures = { workspace = true }
+futures-core = { workspace = true }
+bytes = { workspace = true }
+reqwest = { workspace = true }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true, features = ["serde-serialize"] }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true, features = [
+  'Headers',
+  'Request',
+  'RequestInit',
+  'RequestMode',
+  'Response',
+  'WorkerGlobalScope',
+  'ServiceWorkerGlobalScope',
+  'FormData',
+  'console',
+  'Window',
+]}

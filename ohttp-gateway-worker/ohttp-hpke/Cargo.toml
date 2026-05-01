@@ -1,0 +1,25 @@
+[package]
+name = "ohttp-hpke"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+aead = { workspace = true }
+generic-array = { workspace = true } # HACK: aead dependency which breaks our build with deprecation warnings in later versions, remove when aead is updated
+aes-gcm = { workspace = true }
+bytes = { workspace = true }
+chacha20poly1305 = { workspace = true }
+futures = { workspace = true }
+hkdf = { workspace = true }
+hpke = { workspace = true }
+octets = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+stream-buf = { workspace = true }
+stream-octets = { workspace = true }
+
+# Workers-specific dependencies
+getrandom = { workspace = true }
+wasm-bindgen = { workspace = true }
