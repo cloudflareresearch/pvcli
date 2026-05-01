@@ -27,9 +27,9 @@ impl ConnectionHook for X509ConnectionHook {
         let mut builder = SslContextBuilder::new(SslMethod::tls_client()).ok()?;
         build_ssl_context_builder(
             &mut builder,
-            self.cacert.as_deref(),
-            self.client.as_deref(),
-            self.key.as_deref(),
+            self.cacert.as_ref(),
+            self.client.as_ref(),
+            self.key.as_ref(),
         )
         .wrap_err("failed to build ssl context")
         .ok()?;
@@ -41,9 +41,9 @@ impl ConnectionHook for X509ConnectionHook {
 
 pub fn build_ssl_context_builder(
     builder: &mut SslContextBuilder,
-    cacert_path: Option<&str>,
-    client_path: Option<&str>,
-    key_path: Option<&str>,
+    cacert_path: Option<&String>,
+    client_path: Option<&String>,
+    key_path: Option<&String>,
 ) -> Result<()> {
     builder.set_verify(SslVerifyMode::PEER);
 
@@ -53,6 +53,7 @@ pub fn build_ssl_context_builder(
         client_path,
         key_path
     );
+
     if let Some(path) = cacert_path {
         log::info!("Using custom CA certificate for TLS validation: {}", path);
         let mut store_builder = X509StoreBuilder::new()?;

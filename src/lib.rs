@@ -15,6 +15,8 @@ use foundations::{
     },
 };
 
+use crate::args::TlsConfig;
+
 pub async fn tunnel() {
     let args = Args::parse();
     let mut driver = configure_logging(&args).expect("error configuring telemetry logging");
@@ -47,24 +49,29 @@ pub async fn run(args: Args) -> Result<String> {
 
 pub async fn raw_run(mut args: Args) -> Result<HttpResponse> {
     args.validate()?;
-    let client = select_http_client(&args).await?;
-    client.send_request(args.try_into()?).await
+    let (client, tls_config) = select_http_client(&args).await?;
+    client.send_request(args.try_into()?, &tls_config).await
 }
 
-async fn select_http_client(args: &Args) -> Result<HttpClientKind> {
+async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> {
     if args.ohttp {
-        return Ok(HttpClientKind::OHttp(
-            OHttpClient::new(
-                args.proxy_http3,
-                args.proxy.clone(),
-                args.gateway_path.clone(),
-                args.config_path.clone(),
-                args.proxy_header.clone(),
-                args.first_hop.clone(),
-                &args.proxy_tls_config(),
-            )
-            .await
-            .wrap_err("OHTTP Client initialization error")?,
+        return Ok((
+            HttpClientKind::OHttp(
+                OHttpClient::new(
+                    args.proxy_http3,
+                    args.proxy.clone(),
+                    args.gateway_path.clone(),
+                    args.config_path.clone(),
+                    args.proxy_header.clone(),
+                    &args.proxy_tls_config(),
+                    args.first_hop.clone(),
+                    args.first_hop_header.clone(),
+                    &args.first_hop_tls_config(),
+                )
+                .await
+                .wrap_err("OHTTP Client initialization error")?,
+            ),
+            TlsConfig::default(),
         ));
     }
 
@@ -73,16 +80,17 @@ async fn select_http_client(args: &Args) -> Result<HttpClientKind> {
     }
 
     if args.http3 {
-        return Ok(HttpClientKind::Http3(
-            Http3Client::new(args.url.clone(), &args.tls_config())
-                .await
-                .wrap_err("HTTP/3 Client initialization error")?,
+        return Ok((
+            HttpClientKind::Http3(
+                Http3Client::new()
+                    .await
+                    .wrap_err("HTTP/3 Client initialization error")?,
+            ),
+            args.tls_config(),
         ));
     }
 
-    Ok(HttpClientKind::Http2(
-        Http2Client::new(&args.tls_config()).wrap_err("HTTP/2 Client initialization error")?,
-    ))
+    Ok((HttpClientKind::Http2(Http2Client {}), args.tls_config()))
 }
 
 fn configure_logging(args: &Args) -> BootstrapResult<TelemetryDriver> {

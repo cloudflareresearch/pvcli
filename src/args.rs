@@ -10,16 +10,11 @@ pub enum Method {
     Post,
 }
 
-pub struct TlsConfig<'a> {
-    pub cacert: Option<&'a str>,
-    pub client: Option<&'a str>,
-    pub key: Option<&'a str>,
-}
-
-impl TlsConfig<'_> {
-    pub fn is_empty(&self) -> bool {
-        self.cacert.is_none() && self.client.is_none() && self.key.is_none()
-    }
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    pub cacert: Option<String>,
+    pub client: Option<String>,
+    pub key: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -81,7 +76,7 @@ pub struct Args {
     #[arg(long, default_value = "ohttp-config", requires = "proxy")]
     pub config_path: String,
 
-    /// proxy headers are applied to the encrypted request sent to the specified --proxy (or --first-hop relay)
+    /// proxy headers are applied to the encrypted request sent to the specified --proxy
     #[arg(long, requires = "proxy")]
     pub proxy_header: Vec<String>,
 
@@ -101,12 +96,29 @@ pub struct Args {
     #[arg(short, long, requires = "proxy")]
     pub ohttp: bool,
 
+    /// boolean flag to use http3 for the outer request to the proxy
+    #[arg(long, requires = "proxy")]
+    pub proxy_http3: bool,
+
     /// relay URL for OHTTP, if different from proxy URL
     #[arg(long, requires = "proxy")]
     pub first_hop: Option<String>,
 
-    #[arg(long, requires = "proxy")]
-    pub proxy_http3: bool,
+    /// first-hop headers are applied to the encrypted request sent to the specified --first-hop
+    #[arg(long, requires = "first_hop")]
+    pub first_hop_header: Vec<String>,
+
+    /// path to CA certificate (PEM format) for validating the --first-hop gateway's TLS certificate.
+    #[arg(long, requires = "first_hop")]
+    pub first_hop_cacert: Option<String>,
+
+    /// path to client certificate (PEM format) for TLS validation for --first-hop.
+    #[arg(long, requires = "first_hop", requires = "first_hop_key")]
+    pub first_hop_client: Option<String>,
+
+    /// path to key certificate (PEM format) for TLS validation --first-hop.
+    #[arg(long, requires = "first_hop", requires = "first_hop_client")]
+    pub first_hop_key: Option<String>,
 }
 
 impl Default for Args {
@@ -127,29 +139,57 @@ impl Default for Args {
             config_path: "ohttp-config".to_string(),
             proxy_header: vec![],
             ohttp: false,
-            first_hop: None,
+            proxy_http3: false,
             proxy_cacert: None,
             proxy_client: None,
             proxy_key: None,
-            proxy_http3: false,
+            first_hop: None,
+            first_hop_header: vec![],
+            first_hop_cacert: None,
+            first_hop_client: None,
+            first_hop_key: None,
+        }
+    }
+}
+
+impl TlsConfig {
+    pub fn is_empty(&self) -> bool {
+        self.cacert.is_none() && self.client.is_none() && self.key.is_none()
+    }
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            cacert: None,
+            client: None,
+            key: None,
         }
     }
 }
 
 impl Args {
-    pub fn proxy_tls_config(&self) -> TlsConfig<'_> {
+    pub fn proxy_tls_config(&self) -> TlsConfig {
         TlsConfig {
-            cacert: self.proxy_cacert.as_deref(),
-            client: self.proxy_client.as_deref(),
-            key: self.proxy_key.as_deref(),
+            cacert: self.proxy_cacert.clone(),
+            client: self.proxy_client.clone(),
+            key: self.proxy_key.clone(),
         }
     }
 
-    pub fn tls_config(&self) -> TlsConfig<'_> {
+    pub fn first_hop_tls_config(&self) -> TlsConfig {
         TlsConfig {
-            cacert: self.cacert.as_deref(),
-            client: self.client.as_deref(),
-            key: self.key.as_deref(),
+            cacert: self.first_hop_cacert.clone(),
+            client: self.first_hop_client.clone(),
+            key: self.first_hop_key.clone(),
+        }
+    }
+
+    pub fn tls_config(&self) -> TlsConfig {
+        TlsConfig {
+            cacert: self.cacert.clone(),
+            client: self.client.clone(),
+            key: self.key.clone(),
         }
     }
 

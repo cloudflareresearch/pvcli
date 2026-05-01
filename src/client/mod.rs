@@ -10,7 +10,7 @@ pub use http3::Http3Client;
 pub use ohttp::OHttpClient;
 pub use request::RequestHandler;
 
-use crate::args::RequestArgs;
+use crate::args::{RequestArgs, TlsConfig};
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr};
 use foundations::telemetry::log;
@@ -27,22 +27,22 @@ pub enum HttpClientKind {
 
 #[allow(async_fn_in_trait)]
 pub trait HttpClient {
-    async fn send_request(&self, req: RequestArgs) -> Result<HttpResponse>;
+    async fn send_request(&self, req: RequestArgs, tls_config: &TlsConfig) -> Result<HttpResponse>;
 }
 
 impl HttpClient for HttpClientKind {
-    async fn send_request(&self, req: RequestArgs) -> Result<HttpResponse> {
+    async fn send_request(&self, req: RequestArgs, tls_config: &TlsConfig) -> Result<HttpResponse> {
         match self {
             Self::OHttp(c) => c
-                .send_request(req)
+                .send_request(req, tls_config)
                 .await
                 .wrap_err("OHTTP Client failed to send request"),
             Self::Http2(c) => c
-                .send_request(req)
+                .send_request(req, tls_config)
                 .await
                 .wrap_err("HTTP/2 Client failed to send request"),
             Self::Http3(c) => c
-                .send_request(req)
+                .send_request(req, tls_config)
                 .await
                 .wrap_err("HTTP/3 Client failed to send request"),
         }
@@ -55,14 +55,14 @@ pub enum ProxyClientKind {
 }
 
 impl HttpClient for ProxyClientKind {
-    async fn send_request(&self, req: RequestArgs) -> Result<HttpResponse> {
+    async fn send_request(&self, req: RequestArgs, tls_config: &TlsConfig) -> Result<HttpResponse> {
         match self {
             Self::Http2(c) => c
-                .send_request(req)
+                .send_request(req, tls_config)
                 .await
                 .wrap_err("HTTP/2 Client failed to send request"),
             Self::Http3(c) => c
-                .send_request(req)
+                .send_request(req, tls_config)
                 .await
                 .wrap_err("HTTP/3 Client failed to send request"),
         }
@@ -130,11 +130,11 @@ impl HttpResponse {
         );
         log::info!("Response Headers: {:?}", self.headers);
         log::info!(
-            "Response body, use -vvv for HEX/escaped output ({} bytes): {}",
+            "Response body, use -vvv for HEX/escaped output ({} bytes)",
             self.body.len(),
-            self.body_as_string_lossy()
         );
         log::debug!("Response Body [HEX]: {}", self.body_as_hex());
+        log::debug!("Response Body [LOSSY]: {}", self.body_as_string_lossy());
         log::trace!("Response body [ESCAPED]: {}", self.body_as_string_escaped());
     }
 }

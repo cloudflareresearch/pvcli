@@ -13,51 +13,68 @@ use hyper_boring::v1::HttpsConnector;
 use hyper_util::{
     client::legacy::Client, client::legacy::connect::HttpConnector, rt::TokioExecutor,
 };
-
-pub struct Http2Client {
-    client: Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, HttpBody>,
-}
+pub struct Http2Client {}
 
 impl HttpClient for Http2Client {
-    async fn send_request(&self, args: RequestArgs) -> Result<HttpResponse> {
+    async fn send_request(
+        &self,
+        args: RequestArgs,
+        tls_config: &TlsConfig,
+    ) -> Result<HttpResponse> {
+        let client = self
+            .create_client_with_tls(tls_config)
+            .wrap_err("Failed to create HTTP/2 client with TLS")?;
         let request = RequestHandler::create_request(args).wrap_err("Failed to create request")?;
-        log_and_execute_request(request, |req| self.execute(req))
+        log_and_execute_request(request, |req| self.execute(req, client))
             .await
             .wrap_err("Failed to execute HTTP/2 request")
     }
 }
 
 impl Http2Client {
-    pub fn new(tls_config: &TlsConfig) -> Result<Self> {
+    fn create_client_with_tls(
+        &self,
+        tls_config: &TlsConfig,
+    ) -> Result<Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, HttpBody>>
+    {
         let https = {
             // wrap TCP connection with TLS
             let mut http = HttpConnector::new();
             http.enforce_http(false);
             let mut ssl = SslConnector::builder(SslMethod::tls())?;
-            ssl.set_alpn_protos(b"\x02h2")?;
+            ssl.set_alpn_protos(b"\x02h2\x08http/1.1")?;
             build_ssl_context_builder(
                 &mut ssl,
-                tls_config.cacert,
-                tls_config.client,
-                tls_config.key,
+                tls_config.cacert.as_ref(),
+                tls_config.client.as_ref(),
+                tls_config.key.as_ref(),
             )
             .wrap_err("Failed to build HTTP/2 boringSSL context")?;
 
             HttpsConnector::with_connector(http, ssl)?
         };
 
-        log::debug!("Successfully initialized HTTPS Connector for HTTP2 Client",);
-
-        let client: Client<_, HttpBody> = Client::builder(TokioExecutor::new())
+        log::debug!("Successfully initialized HTTPS Connector for HTTP/2 Client",);
+        let client = Client::builder(TokioExecutor::new())
             // .http2_only(true) // TODO: --http2 flag to force this
             .build(https);
 
-        log::info!("Successfully initialized HTTP/2 Client");
-        Ok(Self { client })
+        log::info!(
+            "Successfully created HTTP/2 Client with TLS configuration: {:?}",
+            tls_config
+        );
+        Ok(client)
     }
 
-    pub async fn execute(&self, request: Request<HttpBody>) -> Result<HttpResponse> {
-        let response: Response<Incoming> = self.client.request(request).await?;
+    pub async fn execute(
+        &self,
+        request: Request<HttpBody>,
+        client: Client<
+            HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+            HttpBody,
+        >,
+    ) -> Result<HttpResponse> {
+        let response: Response<Incoming> = client.request(request).await?;
 
         let http_response = HttpResponse {
             version: response.version(),

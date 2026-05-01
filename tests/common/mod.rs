@@ -91,12 +91,7 @@ impl MockRelay {
                 .body(Body::from("invalid request to relay"))
                 .unwrap()
         } else {
-            let tlsconfig = TlsConfig {
-                cacert: None,
-                client: None,
-                key: None,
-            };
-            let http_client = Http2Client::new(&tlsconfig).unwrap();
+            let http_client = Http2Client {};
             let url = format!("{}/gateway", get_mock_gateway());
             let body = Some(body);
             let args = RequestArgs {
@@ -108,7 +103,12 @@ impl MockRelay {
                     .collect(),
                 body,
             };
-            let result = http_client.send_request(args).await;
+            let tls = TlsConfig {
+                cacert: None,
+                client: None,
+                key: None,
+            };
+            let result = http_client.send_request(args, &tls).await;
 
             match result {
                 Ok(resp) => {

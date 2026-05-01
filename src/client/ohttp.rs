@@ -23,14 +23,21 @@ const MESSAGE_BHTTP_RESPONSE: &str = "message/bhttp response";
 
 pub struct OHttpClient {
     proxy_http_client: ProxyClientKind,
+    proxy_headers: Vec<String>,
     proxy_config_url: String,
     proxy_gateway_url: String,
+    proxy_tls_config: TlsConfig,
     first_hop_url: Option<String>,
-    proxy_headers: Vec<String>,
+    first_hop_headers: Vec<String>,
+    first_hop_tls_config: TlsConfig,
 }
 
 impl HttpClient for OHttpClient {
-    async fn send_request(&self, args: RequestArgs) -> Result<HttpResponse> {
+    async fn send_request(
+        &self,
+        args: RequestArgs,
+        _tls_config: &TlsConfig, // OHTTP client manages its own TLS configs for proxy and first hop, so this is ignored
+    ) -> Result<HttpResponse> {
         let (encap_config, _hex_key_response) = self
             .fetch_proxy_key()
             .await
@@ -59,8 +66,10 @@ impl OHttpClient {
         gateway_path: String,
         config_path: String,
         proxy_headers: Vec<String>,
+        proxy_tls_config: &TlsConfig,
         first_hop_url: Option<String>,
-        proxy_tls_config: &TlsConfig<'_>,
+        first_hop_headers: Vec<String>,
+        first_hop_tls_config: &TlsConfig,
     ) -> Result<Self> {
         log::info!("Initializing OHTTP Client");
         let Some(proxy_url) = proxy_url else {
@@ -81,26 +90,26 @@ impl OHttpClient {
         let proxy_http_client: ProxyClientKind = if proxy_http3 {
             log::info!("Using HTTP/3 client for OHTTP proxy communication");
             ProxyClientKind::Http3(
-                Http3Client::new(proxy_url.to_string(), proxy_tls_config)
+                Http3Client::new()
                     .await
                     .wrap_err("Failed to initialize HTTP/3 client for OHTTP proxy")?,
             )
         } else {
             log::info!("Using HTTP/2 client for OHTTP proxy communication");
-            ProxyClientKind::Http2(
-                Http2Client::new(proxy_tls_config)
-                    .wrap_err("Failed to initialize HTTP/2 client for OHTTP proxy")?,
-            )
+            ProxyClientKind::Http2(Http2Client {})
         };
 
         log::info!("Successfully initialized OHTTP Client");
 
         Ok(Self {
             proxy_http_client,
+            proxy_headers,
             proxy_config_url: key_config_url,
             proxy_gateway_url: gateway_url,
+            proxy_tls_config: proxy_tls_config.clone(),
             first_hop_url: first_hop_url,
-            proxy_headers,
+            first_hop_headers: first_hop_headers,
+            first_hop_tls_config: first_hop_tls_config.clone(),
         })
     }
 
@@ -108,7 +117,7 @@ impl OHttpClient {
         let proxy_args = RequestArgs {
             method: Method::Get,
             url: self.proxy_config_url.clone(),
-            headers: vec![],
+            headers: self.proxy_headers.clone(),
             body: None,
         };
 
@@ -116,7 +125,7 @@ impl OHttpClient {
 
         let response = self
             .proxy_http_client
-            .send_request(proxy_args)
+            .send_request(proxy_args, &self.proxy_tls_config)
             .await
             .wrap_err(format!(
                 "Failed to send request to proxy gateway {}",
@@ -168,32 +177,43 @@ impl OHttpClient {
     }
 
     async fn send_outer_request(&self, encrypted_request: Bytes) -> Result<HttpResponse> {
-        let proxy_url = match &self.first_hop_url {
+        let (outer_request, tls_config) = match &self.first_hop_url {
             Some(first_hop) => {
                 log::info!("Using first hop URL to send outer request: {}", first_hop);
-                first_hop.clone()
+                let mut headers = self.first_hop_headers.clone();
+                headers.push("Content-Type: message/ohttp-req".to_string());
+                (
+                    RequestArgs {
+                        method: Method::Post,
+                        url: first_hop.clone(),
+                        headers,
+                        body: Some(encrypted_request),
+                    },
+                    &self.first_hop_tls_config,
+                )
             }
             None => {
                 log::info!(
                     "No first hop URL provided, using proxy gateway URL for outer request: {}",
                     self.proxy_gateway_url
                 );
-                self.proxy_gateway_url.clone()
+                let mut headers = self.proxy_headers.clone();
+                headers.push("Content-Type: message/ohttp-req".to_string());
+                (
+                    RequestArgs {
+                        method: Method::Post,
+                        url: self.proxy_gateway_url.clone(),
+                        headers,
+                        body: Some(encrypted_request),
+                    },
+                    &self.proxy_tls_config,
+                )
             }
-        };
-
-        let mut headers = self.proxy_headers.clone();
-        headers.push("Content-Type: message/ohttp-req".to_string());
-        let outer_request = RequestArgs {
-            method: Method::Post,
-            url: proxy_url,
-            headers: headers,
-            body: Some(encrypted_request),
         };
 
         let response = self
             .proxy_http_client
-            .send_request(outer_request)
+            .send_request(outer_request, tls_config)
             .await
             .wrap_err("Failed to execute outer OHTTP request")?;
 
@@ -369,8 +389,10 @@ mod unit_tests {
             args.gateway_path.clone(),
             args.config_path.clone(),
             args.proxy_header.clone(),
-            args.first_hop.clone(),
             &args.proxy_tls_config(),
+            args.first_hop.clone(),
+            args.first_hop_header.clone(),
+            &args.first_hop_tls_config(),
         )
         .await
         .expect("Failed to create OHTTP client with provided proxy URL");

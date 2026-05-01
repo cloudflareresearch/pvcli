@@ -28,25 +28,76 @@ use url::Url;
 
 #[derive(Clone)]
 pub struct Http3Client {
-    scid: Arc<ConnectionId<'static>>,
+    quic_settings: QuicSettings,
+}
+
+struct Http3Connection {
+    _scid: Arc<ConnectionId<'static>>,
     request_sender: SendRequest,
     shutdown: UnboundedSender<ConnectionShutdownBehaviour>,
 }
 
+impl Http3Connection {
+    pub fn _scid(&self) -> &ConnectionId<'static> {
+        &self._scid
+    }
+}
+
 impl HttpClient for Http3Client {
-    async fn send_request(&self, args: RequestArgs) -> Result<HttpResponse> {
-        let request = RequestHandler::create_request(args).wrap_err("Failed to create request")?;
-        log_and_execute_request(request, |req| self.execute(req))
+    async fn send_request(
+        &self,
+        args: RequestArgs,
+        tls_config: &TlsConfig,
+    ) -> Result<HttpResponse> {
+        let connection = self
+            .new_connection(args.url.clone(), tls_config)
             .await
-            .wrap_err("Failed to dispatch request")
+            .wrap_err("Failed to establish HTTP/3 connection")?;
+
+        let request = RequestHandler::create_request(args).wrap_err("Failed to create request")?;
+        log_and_execute_request(request, |req| self.execute(req, connection))
+            .await
+            .wrap_err("Failed to dispatch HTTP/3 request")
     }
 }
 
 impl Http3Client {
-    pub async fn new(peer: String, tls_config: &TlsConfig<'_>) -> Result<Self> {
-        let peer_url = Url::parse(&peer)?;
+    pub async fn new() -> Result<Self> {
+        let mut settings = QuicSettings::default();
+        settings.verify_peer = true;
+        settings.handshake_timeout = Some(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS));
+        log::debug!(
+            "Initialized default QUIC settings for HTTP/3 Client: {:?}",
+            settings
+        );
 
-        // Setup TLS configuration
+        Ok(Self {
+            quic_settings: settings,
+        })
+    }
+
+    async fn new_connection(
+        &self,
+        peer: String,
+        tls_config: &TlsConfig,
+    ) -> Result<Http3Connection> {
+        let (dummy_tls, hooks) = self.configure_tls(tls_config)?;
+        let peer_url = Url::parse(&peer)?;
+        let params: ConnectionParams<'_> =
+            ConnectionParams::new_client(self.quic_settings.clone(), dummy_tls, hooks.clone());
+        let client = Http3Client::start_connection(&peer_url, params)
+            .await
+            .wrap_err(format!(
+                "Http3Client failed to start connection to {}",
+                peer_url
+            ))?;
+        Ok(client)
+    }
+
+    fn configure_tls(
+        &self,
+        tls_config: &TlsConfig,
+    ) -> Result<(Option<TlsCertificatePaths<'_>>, Hooks)> {
         let (dummy_tls, connection_hook) = if !tls_config.is_empty() {
             let tls = TlsCertificatePaths {
                 cert: "",
@@ -54,34 +105,23 @@ impl Http3Client {
                 kind: CertificateKind::X509,
             };
             let hook = Arc::new(X509ConnectionHook {
-                cacert: tls_config.cacert.map(|s| s.to_string()),
-                client: tls_config.client.map(|s| s.to_string()),
-                key: tls_config.key.map(|s| s.to_string()),
+                cacert: tls_config.cacert.clone(),
+                client: tls_config.client.clone(),
+                key: tls_config.key.clone(),
             }) as Arc<dyn ConnectionHook + Send + Sync>;
             (Some(tls), Some(hook))
         } else {
             (None, None)
         };
         let hooks = Hooks { connection_hook };
-
-        let mut settings = QuicSettings::default();
-        settings.verify_peer = true;
-        settings.handshake_timeout = Some(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS));
-        let params: ConnectionParams<'_> = ConnectionParams::new_client(settings, dummy_tls, hooks);
-        let client = Http3Client::start_connection(&peer_url, params)
-            .await
-            .wrap_err(format!(
-                "Http3Client failed to start connection to {}",
-                peer_url
-            ))?;
         log::info!(
-            "Successfully initialized Http3Client, scid: {:?}",
-            client.scid()
+            "Successfully configured TLS for HTTP/3 connection with TlsConfig: {:?}",
+            tls_config
         );
-        Ok(client)
+        Ok((dummy_tls, hooks))
     }
 
-    async fn start_connection(url: &Url, params: ConnectionParams<'_>) -> Result<Self> {
+    async fn start_connection(url: &Url, params: ConnectionParams<'_>) -> Result<Http3Connection> {
         let peer_addr = url
             .socket_addrs(|| Some(443))?
             .into_iter()
@@ -150,15 +190,19 @@ impl Http3Client {
             }
         });
 
-        Ok(Self {
-            scid: scid,
+        Ok(Http3Connection {
+            _scid: scid,
             request_sender,
             shutdown,
         })
     }
 
-    async fn execute(&self, request: Request<HttpBody>) -> Result<HttpResponse> {
-        let response = self
+    async fn execute(
+        &self,
+        request: Request<HttpBody>,
+        connection: Http3Connection,
+    ) -> Result<HttpResponse> {
+        let response = connection
             .request_sender
             .send_request(request)
             .await
@@ -187,18 +231,14 @@ impl Http3Client {
             body,
         })
     }
-
-    pub fn scid(&self) -> &ConnectionId<'static> {
-        &self.scid
-    }
 }
 
-impl Drop for Http3Client {
+impl Drop for Http3Connection {
     fn drop(&mut self) {
         H3ConnectionLogger::log(
             Level::Info,
             format!(
-                "Dropping Http3Client, sending shutdown signal (it's fine if the runtime exits before shutdown completes)."
+                "Dropping HTTP3Connection, sending shutdown signal (it's fine if the runtime exits before shutdown completes)."
             ),
         );
         let _ = self.shutdown.send(ConnectionShutdownBehaviour {
