@@ -52,7 +52,7 @@ getrandom = { version = "0.2", features = ["js"] }
 # Chaussette dependencies
 futures-util = "0.3.31"
 h2 = "0.4.7"
-tokio-quiche = "0.6.0"
+tokio-quiche = "0.16.1"
 tokio-util = { version = "0.7.13", features = ["io"] }
 
 # Ferret dependencies
@@ -126,6 +126,5 @@ tokio-util = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 httpmock = { workspace = true }
-s2n-quic = "1.76.0"
 wiremock = { workspace = true }
 test-case = { workspace = true }

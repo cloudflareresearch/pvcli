@@ -11,7 +11,8 @@ ferret/
 │   │       └── main.rs         # Binary entry point (calls tunnel())
 │   ├── client/
 │   │   ├── mod.rs              # HttpClient trait, HttpClientKind enum, HttpResponse struct
-│   │   ├── http2.rs            # Http2Client: direct HTTP/2 requests with TLS
+│   │   ├── cert.rs             # X509ConnectionHook, CertSettings, build_ssl_context_builder
+│   │   ├── http2.rs            # Http2Client: direct HTTP/2 requests with BoringSSL (hyper-boring)
 │   │   ├── http3/              # HTTP/3 client module
 │   │   │   ├── mod.rs          # Http3Client: QUIC/H3 requests via tokio-quiche
 │   │   │   ├── body.rs         # H3Body type for streaming response bodies
@@ -52,6 +53,7 @@ ferret/
 | Mock server routes | `tests/common/mod.rs` |
 | Integration test cases | `tests/integration_tests.rs` |
 | TLS configuration | `src/args.rs` (`TlsConfig`) |
+| TLS cert configuration (H2 + H3) | `src/client/cert.rs` (`build_ssl_context_builder`, `X509ConnectionHook`) |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -69,10 +71,12 @@ ferret/
 | `HttpClientKind` | enum | `src/client/mod.rs` | `OHttp(OHttpClient)` \| `Http2(Http2Client)` \| `Http3(Http3Client)` |
 | `HttpResponse` | struct | `src/client/mod.rs` | `{ version, status, headers, body }` with helper methods |
 | `HttpBody` | type alias | `src/client/mod.rs` | `BoxBody<Bytes, std::io::Error>` — unified body type |
+| `X509ConnectionHook` | struct | `src/client/cert.rs` | `ConnectionHook` impl: configures BoringSSL TLS context for QUIC (custom CA, optional mTLS) |
+| `build_ssl_context_builder` | fn | `src/client/cert.rs` | Shared TLS builder: sets PEER verify mode, loads custom CA or system defaults into an `SslContextBuilder` |
 | `RequestHandler` | trait | `src/client/request.rs` | Shared `create_request()` and `dispatch_request()` logic |
 | `build_request` | fn | `src/client/request.rs` | Builds `Request<HttpBody>` from method, url, headers, body |
 | `consume_headers` | fn | `src/client/request.rs` | Parses `"Key:Value"` header strings onto request builder |
-| `Http2Client` | struct | `src/client/http2.rs` | Direct HTTP/2 client using hyper + rustls |
+| `Http2Client` | struct | `src/client/http2.rs` | Direct HTTP/2 client using hyper + BoringSSL (`hyper-boring`, `boring`) |
 | `Http3Client` | struct | `src/client/http3/mod.rs` | HTTP/3 client using tokio-quiche (QUIC transport) |
 | `Http3Client::start_connection` | method | `src/client/http3/mod.rs` | Sets up UDP socket, QUIC connection, spawns connection task |
 | `SendRequest` | struct | `src/client/http3/connection.rs` | Handle for sending requests over established H3 connection |
@@ -89,6 +93,7 @@ ferret/
 - **Error propagation**: Use `color_eyre::eyre::Result` with `.wrap_err()` for context.
 - **OHTTP flow**: `fetch_proxy_key()` → `encrypt()` → `dispatch_outer_request()` → `decrypt()`
 - **RequestHandler pattern**: Both `Http2Client` and `Http3Client` implement `RequestHandler` for shared request logic.
+- **TLS**: HTTP/2 uses BoringSSL via `hyper-boring` + `boring` crates (not rustls). Custom CA certs loaded via `X509StoreBuilder`.
 ## COMMANDS
 ```bash
 cargo build                                      # build all

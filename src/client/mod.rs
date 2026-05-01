@@ -1,3 +1,4 @@
+mod cert;
 mod http2;
 mod http3;
 mod ohttp;

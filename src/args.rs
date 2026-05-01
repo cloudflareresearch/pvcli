@@ -12,6 +12,8 @@ pub enum Method {
 
 pub struct TlsConfig<'a> {
     pub cacert: Option<&'a str>,
+    pub client: Option<&'a str>,
+    pub key: Option<&'a str>,
 }
 
 #[derive(Parser, Debug)]
@@ -43,6 +45,16 @@ pub struct Args {
     #[arg(long, conflicts_with = "proxy")]
     pub cacert: Option<String>,
 
+    /// path to client certificate (PEM format) for TLS validation.
+    /// If using --proxy, this is ignored. Use --proxy-client to specify a client cert for the gateway when using OHTTP.
+    #[arg(long, conflicts_with = "proxy", requires = "key")]
+    pub client: Option<String>,
+
+    /// path to key certificate (PEM format) for TLS validation.
+    /// If using --proxy, this is ignored. Use --proxy-key to specify a key cert for the gateway when using OHTTP.
+    #[arg(long, conflicts_with = "proxy", requires = "client")]
+    pub key: Option<String>,
+
     /// Use http3 for the request instead of the default http2.
     /// If used with --proxy, only the inner request will be http3.
     /// This requires the outer request to be http3 as well, specified with [TODO] --proxy-http3.
@@ -64,8 +76,16 @@ pub struct Args {
     pub config_path: String,
 
     /// path to CA certificate (PEM format) for validating the --proxy gateway's TLS certificate.
-    #[arg(long = "proxy-cacert", requires = "proxy")]
+    #[arg(long, requires = "proxy")]
     pub proxy_cacert: Option<String>,
+
+    /// path to client certificate (PEM format) for TLS validation for --proxy.
+    #[arg(long, requires = "proxy", requires = "proxy_key")]
+    pub proxy_client: Option<String>,
+
+    /// path to key certificate (PEM format) for TLS validation --proxy.
+    #[arg(long, requires = "proxy", requires = "proxy_client")]
+    pub proxy_key: Option<String>,
 
     /// boolean flag to use ohttp, requires a proxy (see --proxy)
     #[arg(short, long, requires = "proxy")]
@@ -86,6 +106,8 @@ impl Default for Args {
             header: vec![],
             data: None,
             cacert: None,
+            client: None,
+            key: None,
             http3: false,
             proxy: None,
             gateway_path: "gateway".to_string(),
@@ -93,6 +115,8 @@ impl Default for Args {
             ohttp: false,
             first_hop: None,
             proxy_cacert: None,
+            proxy_client: None,
+            proxy_key: None,
         }
     }
 }
@@ -101,12 +125,16 @@ impl Args {
     pub fn proxy_tls_config(&self) -> TlsConfig<'_> {
         TlsConfig {
             cacert: self.proxy_cacert.as_deref(),
+            client: self.proxy_client.as_deref(),
+            key: self.proxy_key.as_deref(),
         }
     }
 
     pub fn tls_config(&self) -> TlsConfig<'_> {
         TlsConfig {
             cacert: self.cacert.as_deref(),
+            client: self.client.as_deref(),
+            key: self.key.as_deref(),
         }
     }
 
@@ -185,14 +213,6 @@ impl Args {
 
     fn validate_proxy(&self) -> Result<Vec<(String, bool)>> {
         let warnings: Vec<(String, bool)> = vec![
-            (
-                "--cacert is not used with --ohttp (gateway handles target TLS). Did you mean --proxy-cacert?".to_string(),
-                self.ohttp && self.cacert.is_some(),
-            ),
-            (
-                "--proxy-cacert is not used without --ohttp or --proxy".to_string(),
-                self.proxy.is_none() && self.proxy_cacert.is_some(),
-            ),
             (
                 "--proxy paired with --http3 requires --proxy-http3 as we need the outer protocol to support http3 if the inner request is http3".to_string(),
                 self.http3 && self.proxy.is_some(),
