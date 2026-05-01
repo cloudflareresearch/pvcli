@@ -6,7 +6,7 @@ A curl-like HTTP/2 and HTTP/3 client for OHTTP, supporting GET and POST requests
 
 ```
 npm install wrangler
-npx wrangler dev --cwd ./ohttp-gateway-worker
+npx wrangler dev --cwd ./crates/ohttp-gateway-worker
 ```
 
 This should build and run the gateway at http://localhost:8787

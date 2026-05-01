@@ -1,11 +1,11 @@
 [workspace]
 members = [
   ".",
-  "ohttp-gateway-worker",
-  "ohttp-gateway-worker/hyper-binary",
-  "ohttp-gateway-worker/ohttp-hpke",
-  "ohttp-gateway-worker/stream-buf",
-  "ohttp-gateway-worker/stream-octets",
+  "crates/ohttp-gateway-worker",
+  "crates/hyper-binary",
+  "crates/ohttp-hpke",
+  "crates/stream-buf",
+  "crates/stream-octets",
 ]
 
 [workspace.package]
@@ -79,10 +79,10 @@ test-case = "3"
 axum = "0.8.8"
 
 # Workspace crates
-stream-buf = { path = "./ohttp-gateway-worker/stream-buf" }
-stream-octets = { path = "./ohttp-gateway-worker/stream-octets" }
-ohttp-hpke = { path = "./ohttp-gateway-worker/ohttp-hpke" }
-hyper-binary = { path = "./ohttp-gateway-worker/hyper-binary" }
+stream-buf = { path = "./crates/stream-buf" }
+stream-octets = { path = "./crates/stream-octets" }
+ohttp-hpke = { path = "./crates/ohttp-hpke" }
+hyper-binary = { path = "./crates/hyper-binary" }
 
 [package]
 name = "ferret"

@@ -1,4 +1,4 @@
-ohttp-gateway-worker/build
+crates/ohttp-gateway-worker/build
 target
 .git
 *.log

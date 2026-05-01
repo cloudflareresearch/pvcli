@@ -14,7 +14,7 @@ services:
       start_period: 120s
     command: >
       sh -c "
-        cd ohttp-gateway-worker &&
+        cd crates/ohttp-gateway-worker &&
         npm install &&
         exec npx wrangler dev --port 8787 --ip 0.0.0.0
       "

@@ -13,10 +13,7 @@
 # Backup files
 *.bak
 *.tmp
-ohttp-gateway-worker/target/
-ohttp-gateway-worker/node_modules/
-ohttp-gateway-worker/.wrangler
+crates/ohttp-gateway-worker/target/
+crates/ohttp-gateway-worker/node_modules/
+crates/ohttp-gateway-worker/.wrangler
 node_modules/
-package*
-package-lock.json
-package.json

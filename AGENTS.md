@@ -22,16 +22,17 @@ ferret/
 │   ├── lib.rs                  # Core logic: run(), select_http_client(), logging setup
 │   ├── args.rs                 # CLI argument definitions (clap), Args validation
 │   └── error.rs                # FerretError enum (thiserror)
+├── crates/                     # Workspace crates
+│   ├── hyper-binary/           # BHTTP encoding/decoding
+│   ├── ohttp-hpke/             # OHTTP HPKE client implementation
+│   ├── stream-buf/             # Stream buffer utilities
+│   ├── stream-octets/          # Octet stream utilities
+│   └── ohttp-gateway-worker/   # Local OHTTP gateway worker
 ├── tests/
 │   ├── integration_tests.rs    # Integration tests for HTTP2, HTTP3, and OHTTP clients
 │   ├── common/
 │   │   └── mod.rs              # Mock server setup, test constants
 │   └── testdata.txt            # Test fixture file
-├── ohttp-gateway-worker/       # Local OHTTP gateway worker
-│   ├── hyper-binary/           # BHTTP encoding/decoding
-│   ├── ohttp-hpke/             # OHTTP HPKE client implementation
-│   ├── stream-buf/             # Stream buffer utilities
-│   └── stream-octets/          # Octet stream utilities
 └── docker-compose.test.yml     # Docker config for integration testing
 ```
 
@@ -126,7 +127,7 @@ cargo run --bin ferret -- --ohttp -x <proxy> <url>  # OHTTP request
 - The foundations crate is sourced from a GitHub fork. See Cargo.toml [workspace.dependencies].
 - POST requests without an explicit Content-Type header will have application/x-www-form-urlencoded injected automatically by Args::validate().
 - Integration tests require a running OHTTP gateway. Use GATEWAY_URL env var to override default http://localhost:8787.
-- OHTTP client uses workspace crates from ohttp-gateway-worker/ for HPKE encryption and BHTTP encoding.
+- OHTTP client uses workspace crates from crates/ for HPKE encryption and BHTTP encoding.
 - Body responses are buffered fully into memory — not streamed.
 - The HttpResponse struct provides multiple body output formats: body_as_string_lossy(), body_as_string_escaped(), body_as_hex().
 - `--cacert` is ignored when using `--ohttp` (the gateway handles target TLS); use `--proxy-cacert` for proxy CA certs.
