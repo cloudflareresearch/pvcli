@@ -10,6 +10,8 @@ tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
 hyper-rustls = { version = "0.27", features = ["http2"] }
+http = "1.4.0"
+httpmock = "0.8.3"
 http-body-util = "0.1"
 rustls = "0.23"
 thiserror = "1"
@@ -18,3 +20,7 @@ bytes = "1"
 
 [dev-dependencies]
 wiremock = "0.6"
+test-case = "3"
+
+[patch.crates-io]
+foundations = { git = "https://github.com/AkshatM/foundations.git", branch = "main" }

@@ -2,6 +2,10 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum FerretError {
+    // argument parsing
+    #[error("invalid argument: {0}")]
+    InvalidArg(String),
+
     // URL/URI parsing
     #[error("invalid URL: {0}")]
     InvalidUrl(#[from] url::ParseError),

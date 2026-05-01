@@ -2,16 +2,16 @@ use crate::error::Result;
 
 use bytes::Bytes;
 use foundations::telemetry::log;
-use http_body_util::{BodyExt, Empty};
-use hyper::body::Incoming;
-use hyper::{Request, Response};
+use http::request::Builder;
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
+use hyper::{Request, Response, body::Incoming};
 use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+
+type Body = BoxBody<Bytes, hyper::Error>;
 
 pub struct HttpClient {
-    client:
-        Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Empty<Bytes>>,
+    client: Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Body>,
 }
 
 impl HttpClient {
@@ -23,15 +23,15 @@ impl HttpClient {
             .enable_http2()
             .build();
 
-        let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new())
+        let client: Client<_, Body> = Client::builder(TokioExecutor::new())
             .http2_only(true)
             .build(https);
 
         Ok(Self { client })
     }
 
-    pub async fn get(&self, url: &str) -> Result<HttpResponse> {
-        log::info!("Fetching {}", url);
+    pub async fn get(&self, url: &str, headers: Vec<String>) -> Result<HttpResponse> {
+        log::info!("GET {}", url);
         log::debug!("Using HTTP/2");
         let uri = url.parse::<hyper::Uri>()?;
 
@@ -42,13 +42,55 @@ impl HttpClient {
             uri.path()
         );
 
-        let request = Request::builder()
-            .method("GET")
-            .uri(&uri)
-            .header("Host", uri.host().unwrap_or(""))
-            .body(Empty::<Bytes>::new())
+        let builder = Request::builder().method("GET").uri(&uri);
+        let request = self
+            .consume_headers(builder, headers)
+            .body(BoxBody::new(Empty::<Bytes>::new().map_err(|e| match e {})))
             .expect("failed to build request");
 
+        log::debug!("request built: {:?}", request);
+
+        self.send_request(request).await
+    }
+
+    pub async fn post(&self, url: &str, headers: Vec<String>, body: Bytes) -> Result<HttpResponse> {
+        log::info!("POST {}", url);
+        log::debug!("Using HTTP/2");
+        let uri = url.parse::<hyper::Uri>()?;
+
+        log::debug!(
+            "Parsed URI - scheme: {:?}, host: {:?}, path: {}",
+            uri.scheme_str(),
+            uri.host(),
+            uri.path()
+        );
+
+        let builder = Request::builder().method("POST").uri(&uri);
+        let request = self
+            .consume_headers(builder, headers)
+            .body(BoxBody::new(Full::new(body).map_err(|e| match e {})))
+            .expect("failed to build request");
+
+        log::debug!("request built: {:?}", request);
+
+        self.send_request(request).await
+    }
+
+    fn consume_headers(&self, mut builder: Builder, headers: Vec<String>) -> Builder {
+        for h in &headers {
+            if let Some((key, header)) = h.split_once(":") {
+                builder = builder.header(
+                    http::header::HeaderName::from_bytes(key.trim().as_bytes()).unwrap(),
+                    http::header::HeaderValue::from_str(header.trim()).unwrap(),
+                );
+            } else {
+                log::warn!("invalid header format: {}", h);
+            }
+        }
+        builder
+    }
+
+    async fn send_request(&self, request: Request<Body>) -> Result<HttpResponse> {
         log::info!("Sending request: {:?}", request);
 
         let response: Response<Incoming> = self.client.request(request).await?;
