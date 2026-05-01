@@ -59,6 +59,7 @@ async fn select_http_client(args: &Args) -> Result<HttpClientKind> {
                 args.proxy.clone(),
                 args.gateway_path.clone(),
                 args.config_path.clone(),
+                args.proxy_header.clone(),
                 args.first_hop.clone(),
                 &args.proxy_tls_config(),
             )

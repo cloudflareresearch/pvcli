@@ -81,6 +81,10 @@ pub struct Args {
     #[arg(long, default_value = "ohttp-config", requires = "proxy")]
     pub config_path: String,
 
+    /// proxy headers are applied to the encrypted request sent to the specified --proxy (or --first-hop relay)
+    #[arg(long, requires = "proxy")]
+    pub proxy_header: Vec<String>,
+
     /// path to CA certificate (PEM format) for validating the --proxy gateway's TLS certificate.
     #[arg(long, requires = "proxy")]
     pub proxy_cacert: Option<String>,
@@ -121,6 +125,7 @@ impl Default for Args {
             proxy: None,
             gateway_path: "gateway".to_string(),
             config_path: "ohttp-config".to_string(),
+            proxy_header: vec![],
             ohttp: false,
             first_hop: None,
             proxy_cacert: None,

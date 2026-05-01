@@ -26,6 +26,7 @@ pub struct OHttpClient {
     proxy_config_url: String,
     proxy_gateway_url: String,
     first_hop_url: Option<String>,
+    proxy_headers: Vec<String>,
 }
 
 impl HttpClient for OHttpClient {
@@ -57,6 +58,7 @@ impl OHttpClient {
         proxy_url: Option<String>,
         gateway_path: String,
         config_path: String,
+        proxy_headers: Vec<String>,
         first_hop_url: Option<String>,
         proxy_tls_config: &TlsConfig<'_>,
     ) -> Result<Self> {
@@ -98,6 +100,7 @@ impl OHttpClient {
             proxy_config_url: key_config_url,
             proxy_gateway_url: gateway_url,
             first_hop_url: first_hop_url,
+            proxy_headers,
         })
     }
 
@@ -179,10 +182,12 @@ impl OHttpClient {
             }
         };
 
+        let mut headers = self.proxy_headers.clone();
+        headers.push("Content-Type: message/ohttp-req".to_string());
         let outer_request = RequestArgs {
             method: Method::Post,
             url: proxy_url,
-            headers: vec!["Content-Type: message/ohttp-req".to_string()],
+            headers: headers,
             body: Some(encrypted_request),
         };
 
@@ -363,6 +368,7 @@ mod unit_tests {
             args.proxy.clone(),
             args.gateway_path.clone(),
             args.config_path.clone(),
+            args.proxy_header.clone(),
             args.first_hop.clone(),
             &args.proxy_tls_config(),
         )
