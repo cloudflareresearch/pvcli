@@ -34,7 +34,7 @@ impl ConnectionHook for X509ConnectionHook {
         .wrap_err("failed to build ssl context")
         .ok()?;
 
-        log::info!("Successfully built SSL context");
+        log::debug!("Built SSL context");
         Some(builder)
     }
 }
@@ -55,7 +55,7 @@ pub fn build_ssl_context_builder(
     );
 
     if let Some(path) = cacert_path {
-        log::info!("Using custom CA certificate for TLS validation: {}", path);
+        log::info!("[TLS CONFIG] Using custom CA certificate: {}", path);
         let mut store_builder = X509StoreBuilder::new()?;
         let pem = &std::fs::read(path).wrap_err("Failed to read proxy CA cert")?;
         let ca =
@@ -67,7 +67,7 @@ pub fn build_ssl_context_builder(
             .set_verify_cert_store(store_builder.build())
             .wrap_err("Failed to set custom cert store")?;
     } else {
-        log::info!("No custom CA certificate provided, using default system trust store");
+        log::debug!("No custom CA certificate provided, using default system trust store");
         builder.set_default_verify_paths()?;
     }
 
@@ -78,12 +78,12 @@ pub fn build_ssl_context_builder(
             ));
         }
         (Some(client), Some(key)) => {
-            log::info!("Using client certificate for mTLS: {}", client);
+            log::info!("[mTLS] Using cert/key: {}, {}", client, key);
             builder.set_certificate_file(client, SslFiletype::PEM)?;
             builder.set_private_key_file(key, SslFiletype::PEM)?;
         }
         (None, None) => {
-            log::info!("No client certificate or key provided, skipping mTLS configuration");
+            log::debug!("No client certificate or key provided, skipping mTLS configuration");
         }
     }
     Ok(())

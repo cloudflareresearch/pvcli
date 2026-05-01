@@ -16,8 +16,7 @@ ferret/
 │   │   ├── http3/              # HTTP/3 client module
 │   │   │   ├── mod.rs          # Http3Client: QUIC/H3 requests via tokio-quiche
 │   │   │   ├── body.rs         # H3Body type for streaming response bodies
-│   │   │   ├── connection.rs   # QUIC connection management, SendRequest handle
-│   │   │   └── logging.rs      # H3ConnectionLogger: structured logging for H3 connections
+│   │   │   └── connection.rs   # QUIC connection management, SendRequest handle
 │   │   ├── ohttp.rs            # OHttpClient: OHTTP-encrypted requests via proxy (H2 or H3)
 │   │   └── request.rs          # RequestHandler trait: shared request building/dispatch logic
 │   ├── lib.rs                  # Core logic: run(), select_http_client(), logging setup
@@ -67,7 +66,7 @@ ferret/
 | `Args` | struct | `src/args.rs` | Clap-parsed CLI arguments |
 | `TlsConfig` | struct | `src/args.rs` | TLS configuration holder (cacert path) |
 | `Args::validate` | method | `src/args.rs` | Calls setup_args, validates basic and proxy args |
-| `RequestArgs` | struct | `src/args.rs` | Validated request parameters (method, url, headers, body) |
+| `RequestArgs` | struct | `src/args.rs` | Validated request parameters (method, url, headers, body, `proxy_connect`, `proxy_tls_config`, `proxy_header`) |
 | `Method` | enum | `src/args.rs` | `Get` \| `Post` — case-insensitive via clap |
 | `HttpClient` | trait | `src/client/mod.rs` | Trait for `send_request()` — implemented by client types |
 | `HttpClientKind` | enum | `src/client/mod.rs` | `OHttp(OHttpClient)` \| `Http2(Http2Client)` \| `Http3(Http3Client)` |
@@ -80,14 +79,22 @@ ferret/
 | `build_request` | fn | `src/client/request.rs` | Builds `Request<HttpBody>` from method, url, headers, body |
 | `consume_headers` | fn | `src/client/request.rs` | Parses `"Key:Value"` header strings onto request builder |
 | `Http2Client` | struct | `src/client/http2.rs` | Direct HTTP/2 client using hyper + BoringSSL (`hyper-boring`, `boring`) |
+| `Http2Client::establish_sender` | method | `src/client/http2.rs` | Establishes connection (direct or via CONNECT proxy), returns `HttpSender` |
+| `Http2Client::connect` | method | `src/client/http2.rs` | Sends HTTP CONNECT request to proxy, upgrades tunnel, returns upgraded stream |
+| `Http2Client::url_parts` | method | `src/client/http2.rs` | Parses a URL into `(Scheme, host, port)` tuple |
+| `Http2Client::tls_handshake` | method | `src/client/http2.rs` | Performs TLS handshake with BoringSSL, returns `(HttpSender, ALPN)` |
 | `Http3Client` | struct | `src/client/http3/mod.rs` | HTTP/3 client using tokio-quiche (QUIC transport) |
 | `Http3Client::start_connection` | method | `src/client/http3/mod.rs` | Sets up UDP socket, QUIC connection, spawns connection task |
 | `SendRequest` | struct | `src/client/http3/connection.rs` | Handle for sending requests over established H3 connection |
 | `Connection` | struct | `src/client/http3/connection.rs` | Manages QUIC/H3 connection lifecycle |
 | `H3Body` | struct | `src/client/http3/body.rs` | Streaming body type for H3 responses (impls AsyncRead/AsyncWrite) |
-| `H3ConnectionLogger` | struct | `src/client/http3/logging.rs` | Structured logging wrapper for H3 connections using `foundations::telemetry::log` |
 | `OHttpClient` | struct | `src/client/ohttp.rs` | OHTTP client: fetches key, encrypts, proxies via H2 or H3, decrypts |
 | `CertSettings` | struct | `src/client/cert.rs` | Client cert + key paths for mTLS in `X509ConnectionHook` |
+| `redact_headers` | fn | `src/client/mod.rs` | Redacts `authorization`-family header values in a `HeaderMap` for logging |
+| `redact_headers_vec` | fn | `src/client/mod.rs` | Redacts `authorization`-family headers in `&[String]` `"Key:Value"` form |
+| `redact_args` | fn | `src/client/mod.rs` | Returns a clone of `Args` with sensitive headers redacted |
+| `redact_request_args` | fn | `src/client/mod.rs` | Returns a clone of `RequestArgs` with sensitive headers redacted |
+| `redact_h3_headers` | fn | `src/client/http3/connection.rs` | Redacts `authorization`-family H3 header values for logging |
 | `FerretError` | enum | `src/error.rs` | Error variants; implements `thiserror::Error` |
 ## CONVENTIONS
 - **Header format**: Headers are `"Key:Value"` strings (colon-separated). See `consume_headers`.

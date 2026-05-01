@@ -1,6 +1,5 @@
-use super::logging::H3ConnectionLogger;
 use bytes::Bytes;
-use foundations::telemetry::settings::Level;
+use foundations::telemetry::log;
 use futures_util::{SinkExt, StreamExt};
 use http_body::Body;
 use http_body_util::BodyDataStream;
@@ -231,13 +230,10 @@ where
         match maybe_chunk {
             Ok(chunk) => {
                 for chunk in chunk.chunks(BufFactory::MAX_BUF_SIZE) {
-                    H3ConnectionLogger::log(
-                        Level::Debug,
-                        format!(
-                            "Sending body chunk {} bytes: {}",
-                            chunk.len(),
-                            String::from_utf8_lossy(chunk),
-                        ),
+                    log::debug!(
+                        "[HTTP/3 DRIVER] Sending body";
+                        "n_bytes" => chunk.len(),
+                        "chunk" => String::from_utf8_lossy(chunk),
                     );
                     // Is it too many levels of chunking?
                     let chunk = OutboundFrame::body(BufFactory::buf_from_slice(chunk), false);
@@ -245,12 +241,9 @@ where
                 }
             }
             Err(error) => {
-                H3ConnectionLogger::log(
-                    Level::Error,
-                    format!(
-                        "Received error when sending or receiving HTTP body: {:?}",
-                        error
-                    ),
+                log::error!(
+                    "[HTTP/3 DRIVER] Received error when sending or receiving HTTP body: {:?}",
+                    error
                 );
 
                 let fin_chunk = OutboundFrame::PeerStreamError;
@@ -261,10 +254,7 @@ where
         }
     }
 
-    H3ConnectionLogger::log(
-        Level::Debug,
-        format!("Finished streaming and sending body, sending fin frame"),
-    );
+    log::debug!("[HTTP/3 DRIVER] Finished streaming and sending body, sending fin frame");
 
     let fin_chunk = OutboundFrame::body(BufFactory::get_empty_buf(), true);
     frame_sender.send(fin_chunk).await.ok()?;

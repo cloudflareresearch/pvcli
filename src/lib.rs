@@ -76,7 +76,19 @@ async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> 
     }
 
     if args.proxy.is_some() {
-        return Err(eyre!("CONNECT proxying not implemented yet"));
+        if args.proxy_http3 {
+            if args.http3 {
+                return Err(eyre!(
+                    "MASQUE, or proxy-http3 connect with inner http3 is not implemented yet"
+                ));
+            }
+            return Err(eyre!(
+                "CONNECT-TLS proxying through http3 is not implemented yet"
+            ));
+        } else {
+            log::info!("[CLIENT] Using HTTP/2 for proxy connection");
+            return Ok((HttpClientKind::Http2(Http2Client {}), args.tls_config()));
+        }
     }
 
     if args.http3 {
@@ -132,14 +144,14 @@ mod unit_tests {
     #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "user-agent" ; "ohttp without header")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
     #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com"], false, "support http3" ; "http3 with proxy requires proxy-http3")]
-    #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "http3 with proxy has proxy-http3")]
-    #[test_case(&["ferret", "https://test_url.com", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "http3 proxy allows http2")]
+    #[test_case(&["ferret", "https://test_url.com", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "proxy-http3 connect is valid but unsupported")]
+    #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "MASQUE, or proxy-http3 connect with inner http3 is valid but unsupported")]
     fn test_args_validation(case: &[&str], expect_pass: bool, expected_contain: &str) {
         let mut args = Args::parse_from(case);
         let result = args.validate();
 
         if expect_pass {
-            assert!(result.is_ok(), "result should be Ok()");
+            assert!(result.is_ok(), "result should be Ok(), is {:?}", result);
             let all_fields = format!("{:?}", args).to_lowercase();
             assert!(
                 all_fields.contains(expected_contain),

@@ -102,6 +102,7 @@ impl MockRelay {
                     .map(|(k, v)| format!("{}:{}", k.unwrap().as_str(), v.to_str().unwrap_or("")))
                     .collect(),
                 body,
+                ..Default::default()
             };
             let tls = TlsConfig {
                 cacert: None,

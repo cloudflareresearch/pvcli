@@ -2,7 +2,7 @@ use super::{HttpClient, HttpResponse, RequestHandler};
 use crate::{
     Http2Client, Http3Client,
     args::{Method, RequestArgs, TlsConfig},
-    client::TransportClientKind,
+    client::{TransportClientKind, redact_request_args},
     error::FerretError,
 };
 
@@ -38,21 +38,27 @@ impl HttpClient for OHttpClient {
         args: RequestArgs,
         _tls_config: &TlsConfig, // OHTTP client manages its own TLS configs for proxy and first hop, so this is ignored
     ) -> Result<HttpResponse> {
-        let (encap_config, _hex_key_response) = self
+        log::info!("[FETCH KEY] Requesting gateway key");
+        let (encap_config, hex_key_response) = self
             .fetch_proxy_key()
             .await
             .wrap_err("Failed to fetch OHTTP proxy key")?;
+        log::info!("[FETCH KEY]"; "key" => hex_key_response.body_as_hex());
 
+        log::info!("[ENCRYPT] Encrypt inner request");
         let (bytes, response_receiving_ctx) = self
             .encrypt(args, encap_config)
             .await
             .wrap_err("Failed to encrypt inner request")?;
 
+        log::info!("[OUTER REQUEST] Sending outer request to proxy");
         let response = self
             .send_outer_request(bytes)
             .await
             .wrap_err("Failed to send outer request")?;
+        log::info!("[OUTER REQUEST] Response status: {}", response.status);
 
+        log::info!("[DECRYPT] Decrypt response");
         self.decrypt(response, response_receiving_ctx)
             .await
             .wrap_err("Failed to decrypt response")
@@ -71,7 +77,6 @@ impl OHttpClient {
         first_hop_headers: Vec<String>,
         first_hop_tls_config: &TlsConfig,
     ) -> Result<Self> {
-        log::info!("Initializing OHTTP Client");
         let Some(proxy_url) = proxy_url else {
             return Err(eyre!("No proxy url (--proxy, -x) provided for ohttp"));
         };
@@ -84,22 +89,22 @@ impl OHttpClient {
         let gateway_url = format!("{}/{}", proxy_url, gateway_path);
         let key_config_url = format!("{}/{}", proxy_url, config_path);
 
-        log::debug!("Constructed OHTTP gateway URL: {}", gateway_url);
-        log::debug!("Constructed OHTTP config URL: {}", key_config_url);
+        log::debug!("Constructed OHTTP endpoints";
+            "gateway_url" => gateway_url.clone(),
+            "config_url" => key_config_url.clone()
+        );
 
-        let proxy_http_client: TransportClientKind = if proxy_http3 {
-            log::info!("Using HTTP/3 client for OHTTP proxy communication");
+        let proxy_http_client = if proxy_http3 {
+            log::info!("[OHTTP] Using HTTP/3 client for proxy requests");
             TransportClientKind::Http3(
                 Http3Client::new()
                     .await
                     .wrap_err("Failed to initialize HTTP/3 client for OHTTP proxy")?,
             )
         } else {
-            log::info!("Using HTTP/2 client for OHTTP proxy communication");
+            log::info!("[OHTTP] Using HTTP/2 client for proxy requests");
             TransportClientKind::Http2(Http2Client {})
         };
-
-        log::info!("Successfully initialized OHTTP Client");
 
         Ok(Self {
             proxy_http_client,
@@ -119,9 +124,10 @@ impl OHttpClient {
             url: self.proxy_config_url.clone(),
             headers: self.proxy_headers.clone(),
             body: None,
+            ..Default::default()
         };
 
-        log::trace!("Key request args: {:?}", proxy_args);
+        log::trace!("Key request"; "args" => format!("{:?}", redact_request_args(&proxy_args)));
 
         let response = self
             .proxy_http_client
@@ -148,21 +154,21 @@ impl OHttpClient {
         }
 
         let hex_key = hex::encode(response.body.as_ref());
-        log::info!(
-            "Successfully queried OHTTP key directory ({} bytes) [HEX]: {}",
-            hex_key.len() / 2,
-            hex_key
+        log::debug!(
+            "Queried OHTTP key directory";
+            "n_bytes" => hex_key.len() / 2,
+            "hex_key" => hex_key.clone()
         );
 
         let mut stream_buf: EmptyStreamBuf<Report> = StreamBuf::from(response.body);
         let client_config: ClientConfig = decode_config(&mut stream_buf)
             .await
             .wrap_err("Failed to decode client config")?;
-        log::info!("Decoded OHTTP client config");
+        log::info!("[FETCH KEY] Decoded key client config");
         log::trace!("Full decoded client config: {:?}", client_config);
 
         let encap_config = client_config.first_encap_config(); // likely preferred config
-        log::debug!("Using encap config key_id: {}", encap_config.key_id);
+        log::debug!("Using encap config"; "key_id" => encap_config.key_id);
         log::trace!("Full encap config: {:?}", encap_config);
 
         Ok((
@@ -179,7 +185,10 @@ impl OHttpClient {
     async fn send_outer_request(&self, encrypted_request: Bytes) -> Result<HttpResponse> {
         let (outer_request, tls_config) = match &self.first_hop_url {
             Some(first_hop) => {
-                log::info!("Using first hop URL to send outer request: {}", first_hop);
+                log::info!(
+                    "[OUTER REQUEST] Send request to first hop relay";
+                    "url" => first_hop
+                );
                 let mut headers = self.first_hop_headers.clone();
                 headers.push("Content-Type: message/ohttp-req".to_string());
                 (
@@ -188,14 +197,15 @@ impl OHttpClient {
                         url: first_hop.clone(),
                         headers,
                         body: Some(encrypted_request),
+                        ..Default::default()
                     },
                     &self.first_hop_tls_config,
                 )
             }
             None => {
                 log::info!(
-                    "No first hop URL provided, using proxy gateway URL for outer request: {}",
-                    self.proxy_gateway_url
+                    "[OUTER REQUEST] Send request to proxy gateway";
+                    "url" => self.proxy_gateway_url.clone()
                 );
                 let mut headers = self.proxy_headers.clone();
                 headers.push("Content-Type: message/ohttp-req".to_string());
@@ -205,6 +215,7 @@ impl OHttpClient {
                         url: self.proxy_gateway_url.clone(),
                         headers,
                         body: Some(encrypted_request),
+                        ..Default::default()
                     },
                     &self.proxy_tls_config,
                 )
@@ -217,10 +228,6 @@ impl OHttpClient {
             .await
             .wrap_err("Failed to execute outer OHTTP request")?;
 
-        log::info!(
-            "Received response to outer request with status: {}",
-            response.status
-        );
         Ok(response)
     }
 
@@ -229,7 +236,6 @@ impl OHttpClient {
         args: RequestArgs,
         encap_config: EncapConfig,
     ) -> Result<(Bytes, ResponseReceivingContext)> {
-        log::info!("Encapsulating inner request");
         let (request_sending_ctx, response_receiving_ctx) = setup_request_encapsulation(
             encap_config,
             MESSAGE_BHTTP_REQUEST,
@@ -237,6 +243,7 @@ impl OHttpClient {
         )
         .map_err(|e| FerretError::HpkeError(format!("{:?}", e)))
         .wrap_err("Failed to set up request encapsulation, use -vvv to debug raw bytes")?;
+        log::info!("[ENCRYPT] Use key config to set encapsulation context");
 
         log::trace!("Request sending context: {:?}", request_sending_ctx);
         log::trace!("Response receiving context: {:?}", response_receiving_ctx);
@@ -255,13 +262,13 @@ impl OHttpClient {
             .into();
 
         log::info!(
-            "BHTTP encoding inner request complete ({} bytes)",
-            bhttp_bytes.len()
+            "[ENCRYPT] BHTTP-encoded inner request";
+            "n_bytes" => bhttp_bytes.len()
         );
         log::trace!(
-            "BHTTP encoded request bytes ({} bytes) [HEX]: {}",
-            bhttp_bytes.len(),
-            hex::encode(bhttp_bytes.as_ref())
+            "BHTTP encoded request bytes";
+            "n_bytes" => bhttp_bytes.len(),
+            "hex" => hex::encode(bhttp_bytes.as_ref())
         );
 
         let bhttp_stream: EmptyStreamBuf<Report> = StreamBuf::from(bhttp_bytes);
@@ -276,14 +283,14 @@ impl OHttpClient {
             .into();
 
         log::trace!(
-            "Encrypted request bytes ({} bytes) [HEX]: {}",
-            encrypted_request.len(),
-            hex::encode(encrypted_request.as_ref())
+            "Encrypted request bytes";
+            "n_bytes" => encrypted_request.len(),
+            "hex" => hex::encode(encrypted_request.as_ref())
         );
 
         log::info!(
-            "Successfully encapsulated request with HPKE ({} bytes)",
-            encrypted_request.len()
+            "[ENCRYPT] Encapsulated request (HPKE)";
+            "n_bytes" => encrypted_request.len()
         );
 
         Ok((encrypted_request, response_receiving_ctx))
@@ -294,11 +301,10 @@ impl OHttpClient {
         response: HttpResponse,
         response_receiving_ctx: ResponseReceivingContext,
     ) -> Result<HttpResponse> {
-        log::info!("Decrypting OHTTP response");
         log::trace!(
-            "Raw response body ({} bytes): {}",
-            response.body.len(),
-            response.body_as_string_escaped()
+            "Raw response body";
+            "n_bytes" => response.body.len(),
+            "body" => response.body_as_string_escaped()
         );
         match response.status {
             200 => {}
@@ -307,6 +313,15 @@ impl OHttpClient {
                     status: response.status,
                     message: format!(
                         "OHTTP Gateway returned error, try disabling WARP or use a different wifi network and try again: {}",
+                        response.body_as_string_escaped()
+                    ),
+                })?;
+            }
+            403 => {
+                return Err(FerretError::UnexpectedStatus {
+                    status: response.status,
+                    message: format!(
+                        "OHTTP Gateway returned error, check if the endpoint is a relay with a path: {}",
                         response.body_as_string_escaped()
                     ),
                 })?;
@@ -330,11 +345,15 @@ impl OHttpClient {
             .wrap_err(
                 "Failed to decapsulate response. This may indicate the relay forwarded to a different gateway than specified by -x"
             )?;
+        log::info!(
+            "[DECRYPT] Decapsulated response";
+            "n_bytes" => decapsulated_bhttp.len()
+        );
 
         log::trace!(
-            "Decapsulated response ({} bytes) [HEX]: {}",
-            decapsulated_bhttp.len(),
-            hex::encode(decapsulated_bhttp.as_ref())
+            "Decapsulated response";
+            "n_bytes" => decapsulated_bhttp.len(),
+            "hex" => hex::encode(decapsulated_bhttp.as_ref())
         );
 
         let decapsulated_buf: EmptyStreamBuf<Report> = StreamBuf::from(decapsulated_bhttp);
@@ -342,14 +361,23 @@ impl OHttpClient {
             .await
             .wrap_err("Failed to decode BHTTP response")?;
 
-        let http_response = HttpResponse {
-            version: bhttp_decoded.version(),
-            status: bhttp_decoded.status().as_u16(),
-            headers: bhttp_decoded.headers().clone(),
-            body: bhttp_decoded.into_body().collect().await?.to_bytes(),
-        };
+        let (version, status, headers) = (
+            bhttp_decoded.version(),
+            bhttp_decoded.status().as_u16(),
+            bhttp_decoded.headers().clone(),
+        );
+        let body = bhttp_decoded.into_body().collect().await?.to_bytes();
 
-        log::info!("Successfully decapsulated OHTTP response");
+        log::info!("[DECRYPT] Decoded response";
+            "n_bytes" => body.len()
+        );
+
+        let http_response = HttpResponse {
+            version,
+            status,
+            headers,
+            body,
+        };
         http_response.log_response();
 
         Ok(http_response)

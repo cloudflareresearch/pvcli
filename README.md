@@ -16,7 +16,7 @@ This should build and run the gateway at http://localhost:8787
 Use -v for INFO logs, -vv for DEBUG, and -vvv for TRACE.
 See -h, --help for more options.
 
-### Basic HTTP2 query
+### Basic HTTP/2 query
 
 ```
 $ cargo run -- https://cloudflare.com/cdn-cgi/trace
@@ -38,7 +38,7 @@ rbi=off
 kex=X25519MLKEM768
 ```
 
-### Basic HTTP3 query
+### Basic HTTP/3 query
 
 ```
 $ cargo run -- --http3 https://cloudflare.com/cdn-cgi/trace
@@ -53,6 +53,22 @@ $ cargo run -- -vvv --ohttp \
     --header "content-type: application/json" \
     --data '{"test":1}' \
     https://target.ohttp.info/anything
+```
+
+### HTTP/2 CONNECT Proxying
+
+Use `-x` to proxy requests through an HTTP/2 CONNECT proxy:
+
+```
+$ cargo run -- -x https://your-proxy.example.com https://target.example.com
+```
+
+You can add custom headers to the proxy request with `--proxy-header`:
+
+```
+$ cargo run -- -x https://your-proxy.example.com \
+  --proxy-header "Proxy-Authorization: Bearer <token>" \
+  https://target.example.com
 ```
 
 ### Basic OHTTP query to local ohttp-gateway-worker booted up with `npx wrangler dev`

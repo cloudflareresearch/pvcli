@@ -1,8 +1,7 @@
 use super::body::{BoxedBody, H3Body, send_hyper_body};
-use super::logging::H3ConnectionLogger;
 use bytes::Bytes;
 use color_eyre::eyre::{Result, eyre};
-use foundations::telemetry::settings::Level;
+use foundations::telemetry::log;
 use h2::ext::Protocol;
 use http::{Method, Request, Response, Version};
 use http_body::Body;
@@ -94,33 +93,35 @@ impl Connection {
     }
 
     pub async fn run(mut self) -> QuicResult<()> {
+        log::info!("[HTTP/3 DRIVER] Startup HTTP/3 event listener");
         loop {
             select! {
                 biased;
                 req = self.h3_event_receiver.recv() => match req {
                     Some(req) => {
-                        H3ConnectionLogger::log(Level::Trace, format!("Driver received H3 event: {:?}", req));
+                        log::trace!("[HTTP/3 DRIVER] Received H3 event: {:?}", req);
                         self.handle_event(req).await?
                     },
                     None => {
-                        H3ConnectionLogger::log(Level::Info, "H3 Event channel closed");
+                        log::info!("[HTTP/3 DRIVER] H3 Event channel closed");
                         return Ok(())
                     }
                 },
 
                 Some(request) = self.client_req_receiver.recv() => {
-                    H3ConnectionLogger::log(Level::Info, "Driver handling client request");
+                    log::debug!("[HTTP/3 DRIVER] Handling client request");
                     self.handle_client_req(request)?;
                 }
 
                 Some(shutdown_request) = self.client_shutdown_receiver.recv() => {
-                    H3ConnectionLogger::log(Level::Info, format!("Driver sending shutdown request={:?} to H3 controller", shutdown_request));
+                    log::debug!("[HTTP/3 DRIVER] Sending shutdown request to H3 controller");
+                    log::debug!("[HTTP/3 DRIVER] Shutdown request={:?}", shutdown_request);
                     let h3_cmd_sender = self.quic_connection.h3_controller.cmd_sender();
                     let _ = h3_cmd_sender.send(QuicCommand::ConnectionClose(shutdown_request));
                     self.cancel_token.cancel();
                 }
                 () = self.cancel_token.cancelled() => {
-                    H3ConnectionLogger::log(Level::Info, "Driver cleaning up QUIC connection");
+                    log::info!("[HTTP/3 DRIVER] Cleaning up QUIC connection");
                     let _ = self.quic_connection.shutdown_connection().await;
                     return Ok(())
                 },
@@ -186,20 +187,16 @@ impl Connection {
                     ))?
                 };
 
-                H3ConnectionLogger::log(
-                    Level::Debug,
-                    format!(
-                        "Received response for request_id={}, stream_id={}, headers={:?}",
-                        request_id, stream_id, headers
-                    ),
+                log::debug!(
+                    "[HTTP/3 DRIVER] Received response";
+                    "request_id" => request_id,
+                    "stream_id"=>stream_id,
+                    "headers"=> format!("{:?}", redact_h3_headers(&headers))
                 );
 
                 let Some(PendingRequest { response }) = self.pending_requests.remove(&request_id)
                 else {
-                    H3ConnectionLogger::log(
-                        Level::Warning,
-                        format!("Missing request_id={}", request_id),
-                    );
+                    log::warn!("[HTTP/3 DRIVER] Missing request_id: {}", request_id);
                     return Ok(());
                 };
 
@@ -242,12 +239,11 @@ impl Connection {
         let headers = hyper_request_parts_to_h3_headers(parts);
 
         let has_body = body.size_hint().exact() != Some(0);
-        H3ConnectionLogger::log(
-            Level::Debug,
-            format!(
-                "Outbound request request_id={}, headers={:?}, has_body={:?}",
-                request_id, headers, has_body
-            ),
+        log::debug!(
+            "[HTTP/3 DRIVER] Outbound request";
+            "request_id" => request_id,
+            "headers" => format!("{:?}", redact_h3_headers(&headers)),
+            "has_body" => has_body
         );
 
         let (body_writer_tx, body_writer_rx) = oneshot::channel();
@@ -275,10 +271,10 @@ impl Connection {
                         tokio::spawn(send_hyper_body(body, h3_body));
                     }
                     Err(e) => {
-                        H3ConnectionLogger::log(
-                            Level::Error,
-                            format!("Unable to get writer for client body: {:?}", e),
-                        );
+                        log::error!(
+                            "[HTTP/3 DRIVER] Unable to get writer for client body: {:?}",
+                            e
+                        )
                     }
                 }
             });
@@ -378,4 +374,19 @@ impl SendRequest {
 
         Ok(rx.await?)
     }
+}
+
+pub fn redact_h3_headers(headers: &[h3::Header]) -> Vec<String> {
+    headers
+        .iter()
+        .map(|h| {
+            let name = String::from_utf8_lossy(h.name());
+            let value = if name.contains("authorization") {
+                "REDACTED".to_string()
+            } else {
+                String::from_utf8_lossy(h.value()).to_string()
+            };
+            format!("{}: {}", name, value)
+        })
+        .collect()
 }

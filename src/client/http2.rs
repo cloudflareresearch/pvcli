@@ -2,7 +2,11 @@ use super::{
     HttpBody, HttpClient, HttpResponse, RequestHandler, cert::build_ssl_context_builder,
     log_and_execute_request,
 };
-use crate::args::{RequestArgs, TlsConfig};
+use crate::{
+    args::{RequestArgs, TlsConfig},
+    client::redact_headers,
+    client::request::REQUEST_TIMEOUT_SECONDS,
+};
 
 use boring::ssl::{SslConnector, SslMethod};
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -14,6 +18,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
+    time::timeout,
 };
 
 /**
@@ -28,9 +33,10 @@ impl HttpClient for Http2Client {
         args: RequestArgs,
         tls_config: &TlsConfig,
     ) -> Result<HttpResponse> {
-        let sender = Http2Client::create_connection(args.url.clone(), tls_config)
+        let sender = Http2Client::establish_sender(&args, tls_config)
             .await
-            .wrap_err("Failed to create HTTP/2 client")?;
+            .wrap_err("Failed to establish connection and get sender for HTTP/2 request")?;
+
         let request =
             RequestHandler::build_request_wrapper(args).wrap_err("Failed to create request")?;
         log_and_execute_request(request, |req| Http2Client::execute_request(req, sender))
@@ -52,21 +58,35 @@ impl HttpSender {
             Self::H1(s) => {
                 // add Host header if not already present
                 if !req.headers().contains_key(http::header::HOST) {
-                    if let Some(host) = req.uri().authority().map(|a| a.as_str().to_string()) {
-                        req.headers_mut().insert(
-                            http::header::HOST,
-                            host.parse()
-                                .map_err(|e| eyre!("Invalid host header: {e}"))?,
-                        );
-                    }
+                    let host = req
+                        .uri()
+                        .authority()
+                        .map(|a| a.as_str().to_string())
+                        .ok_or_else(|| eyre!("Request URI must include authority (host)"))?;
+                    req.headers_mut().insert(
+                        http::header::HOST,
+                        host.parse()
+                            .map_err(|e| eyre!("Invalid host header: {e}"))?,
+                    );
                 }
                 // convert to origin-form URI
                 if let Some(pq) = req.uri().path_and_query().cloned() {
                     *req.uri_mut() = pq.as_str().parse()?;
                 }
+
+                log::debug!(
+                    "Executing HTTP/1.1 request";
+                    "method"=> req.method().to_string(),
+                    "uri" => req.uri().to_string(),
+                    "headers" => format!("{:?}", redact_headers(req.headers()))
+                );
+                log::info!("[REQUEST] Sending HTTP/1.1 request";"uri" => req.uri().to_string());
                 s.send_request(req).await.map_err(|e| eyre!("{e}"))
             }
-            Self::H2(s) => s.send_request(req).await.map_err(|e| eyre!("{e}")),
+            Self::H2(s) => {
+                log::info!("[REQUEST] Sending HTTP/2 request"; "uri" => req.uri().to_string());
+                s.send_request(req).await.map_err(|e| eyre!("{e}"))
+            }
         }
     }
 }
@@ -102,132 +122,164 @@ impl Http2Client {
         })
     }
 
-    async fn create_connection(peer: String, tls_config: &TlsConfig) -> Result<HttpSender> {
-        let (tcp_stream, host, port): (TcpStream, String, u16) =
-            Http2Client::tcp_connection(peer.clone()).await?;
+    async fn establish_sender(
+        args: &RequestArgs,
+        target_tls_config: &TlsConfig,
+    ) -> Result<HttpSender> {
+        let request_url = args.proxy_connect.as_ref().unwrap_or(&args.url);
+        let tls_config = args.proxy_tls_config.as_ref().unwrap_or(target_tls_config);
+        let (scheme, host, port) = Http2Client::url_parts(request_url.clone())?;
+        let scheme_str = scheme.as_str().to_uppercase();
+        log::info!( "[TCP HANDSHAKE] Sending connection request"; "url" => request_url.clone());
 
+        let tcp_stream = Http2Client::tcp_connection(request_url.clone()).await?;
+        log::info!("[TCP HANDSHAKE] Connection established");
+
+        log::debug!(
+            "[{}]", scheme_str;
+            "IP"=> tcp_stream
+                .peer_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|_| "unknown IP".to_string()),
+            "host"=> host.clone(),
+            "port" => port
+        );
+
+        log::info!("[TLS HANDSHAKE] Initiating handshake");
+        let (sender, alpn) =
+            Http2Client::tls_handshake(request_url.clone(), host, port, tcp_stream, tls_config)
+                .await
+                .wrap_err("Failed to create HTTP/2 client for proxy connection")?;
+
+        log::info!(
+            "[TLS HANDSHAKE] Completed";
+            "ALPN" => alpn.to_string(),
+            "boringSSL" => format!("{:?}", tls_config)
+        );
+
+        // If proxy is specified, establish CONNECT tunnel + tls handshake with target through proxy
+        if args.proxy_connect.is_some() {
+            log::debug!(
+                "Proxy CONNECT option detected, using tunnel through proxy: {} to connect to target: {}",
+                request_url,
+                args.url
+            );
+            let (_scheme, host, port) = Http2Client::url_parts(args.url.clone())?;
+            log::info!("[CONNECT] Requesting tunnel"; "target" => args.url.clone());
+            let stream = Http2Client::connect(sender, args.url.clone(), args.proxy_header.clone())
+                .await
+                .wrap_err("Failed to establish CONNECT tunnel to target through proxy")?;
+
+            log::info!("[CONNECT TLS HANDSHAKE] Initiating handshake over tunnel");
+            let (sender, alpn) =
+                Http2Client::tls_handshake(args.url.clone(), host, port, stream, target_tls_config)
+                    .await
+                    .wrap_err("Failed to handshake target connection through proxy")?;
+            log::info!(
+                "[CONNECT] Tunnel ready";
+                "ALPN" => alpn.to_string(),
+                "boringSSL" => format!("{:?}", target_tls_config)
+            );
+            return Ok(sender);
+        }
+        Ok(sender)
+    }
+
+    async fn tcp_connection(peer: String) -> Result<TcpStream> {
+        let (_scheme, host, port) = Http2Client::url_parts(peer.clone())?;
+
+        log::debug!("Initiating TCP connection to peer {}", peer);
+        let tcp_stream = timeout(
+            std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
+            tokio::net::TcpStream::connect((host.clone(), port)),
+        )
+        .await
+        .map_err(|_| {
+            eyre!(
+                "TCP connection to {}:{} timed out after {}s",
+                host,
+                port,
+                REQUEST_TIMEOUT_SECONDS
+            )
+        })?
+        .map_err(|e| {
+            eyre!(
+                "Failed to TCP connect to peer ({}) {}:{}: {e}",
+                peer,
+                host,
+                port
+            )
+        })?;
+        log::info!(
+            "Successfully established TCP connection";
+            "peer" => format!("{}:{}", host, port)
+        );
+        Ok(tcp_stream)
+    }
+
+    async fn tls_handshake<S>(
+        peer: String,
+        host: String,
+        port: u16,
+        tcp_stream: S,
+        tls_config: &TlsConfig,
+    ) -> Result<(HttpSender, String)>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        log::debug!(
+            "Initiating TLS handshake";
+            "peer" => peer.clone(),
+            "host_and_port" => format!("{}:{}", host, port),
+            "boringSSL" => format!("{:?}", tls_config)
+        );
         // if we use HTTPS, use tls_config for TLS handshake and examine ALPN to determine H/2 or H/1.1
         // TODO: --http2 flag to force HTTP/2 only
-        let sender = if peer.starts_with("https://") {
-            log::info!(
-                "Proceeding with HTTPS Scheme: initiating TLS handshake and ALPN negotiation with peer {}",
-                peer
-            );
+        if peer.starts_with("https://") {
+            log::debug!("Proceeding with HTTPS Scheme");
             let ssl_connector = Http2Client::ssl_config_from_tls_config(tls_config)?;
-            log::debug!(
-                "Starting TLS handshake with boringSSL, using provided TLS configuration: {:?}",
-                ssl_connector
-            );
+
             let connection =
                 tokio_boring::connect(ssl_connector.configure()?, host.as_ref(), tcp_stream)
                     .await
                     .map_err(|e| eyre!("TLS handshake failed: {e}"))?;
 
-            log::info!("Successfully performed TLS handshake and ALPN negotiation",);
             let alpn = connection.ssl().selected_alpn_protocol();
-            let sender = match alpn {
+            let (sender, alpn_str) = match alpn {
                 Some(b"h2") => {
-                    log::info!("Selected ALPN protocol: HTTP/2");
-                    Http2Client::http2_handshake(TokioIo::new(connection), host, port)
-                        .await
-                        .wrap_err("Failed http/2 handshake")?
+                    log::debug!("Selected ALPN protocol: HTTP/2 {:?}", alpn);
+                    (
+                        Http2Client::http2_handshake(TokioIo::new(connection), host, port)
+                            .await
+                            .wrap_err("Failed http/2 handshake")?,
+                        "h2",
+                    )
                 }
                 _ => {
-                    log::info!("Default to ALPN protocol: HTTP/1.1 from {:?}", alpn);
-                    Http2Client::http1_handshake(TokioIo::new(connection), host, port)
-                        .await
-                        .wrap_err("Failed http/1.1 handshake")?
+                    log::debug!("Default to ALPN protocol: HTTP/1.1 from {:?}", alpn);
+                    (
+                        Http2Client::http1_handshake(TokioIo::new(connection), host, port)
+                            .await
+                            .wrap_err("Failed http/1.1 handshake")?,
+                        "http/1.1",
+                    )
                 }
             };
-            sender
+            Ok((sender, alpn_str.to_string()))
         } else {
-            // http/1.1 fallback
             if !tls_config.is_empty() {
                 log::warn!("Ignoring TLS configuration for non-HTTPS URL scheme");
             }
-            log::info!("Proceeding with HTTP Scheme: initiating HTTP/1.1 handshake with peer");
+            log::debug!("Proceeding with HTTP Scheme");
             let sender = Http2Client::http1_handshake(TokioIo::new(tcp_stream), host, port)
                 .await
                 .wrap_err("Failed http/1.1 handshake")?;
-            sender
-        };
-        log::info!(
-            "Successfully performed handshake and established connection to peer: {}",
-            peer
-        );
-        Ok(sender)
-    }
-
-    async fn tcp_connection(peer: String) -> Result<(TcpStream, String, u16)> {
-        let uri = peer
-            .parse::<hyper::Uri>()
-            .wrap_err("Failed to parse peer URL")?;
-        let Some(host) = uri.host() else {
-            return Err(eyre!("Peer URL must include host"));
-        };
-        let port = uri.port_u16().unwrap_or(match uri.scheme() {
-            Some(s) if s == &Scheme::HTTPS => 443,
-            _ => 80,
-        });
-        log::debug!("Parsed peer URI {}: host: {}, port: {}", uri, host, port);
-
-        let tcp_stream = tokio::net::TcpStream::connect((host, port))
-            .await
-            .map_err(|e| eyre!("Failed to TCP connect to peer {}:{}: {e}", host, port))?;
-        log::info!(
-            "Successfully established TCP connection to peer {}:{}",
-            host,
-            port
-        );
-        Ok((tcp_stream, host.to_string(), port))
-    }
-
-    async fn http2_handshake(
-        tcp: TokioIo<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>,
-        host: String,
-        port: u16,
-    ) -> Result<HttpSender> {
-        let (sender, conn) =
-            hyper::client::conn::http2::handshake::<_, _, HttpBody>(TokioExecutor::new(), tcp)
-                .await
-                .wrap_err(format!("HTTP/2 handshake with {}:{} failed", host, port))?;
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                log::error!("Connection driver error: {:?}", e);
-            }
-        });
-        log::info!(
-            "Successfully completed HTTP/2 handshake with {}:{}",
-            host,
-            port
-        );
-        Ok(HttpSender::H2(sender))
-    }
-
-    async fn http1_handshake(
-        tcp: TokioIo<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>,
-        host: String,
-        port: u16,
-    ) -> Result<HttpSender> {
-        let (sender, conn) = hyper::client::conn::http1::Builder::new()
-            .handshake::<_, HttpBody>(tcp)
-            .await
-            .wrap_err(format!("HTTP/1.1 handshake with {}:{} failed", host, port))?;
-        tokio::spawn(async move {
-            if let Err(e) = conn.with_upgrades().await {
-                log::error!("proxy connection driver error: {:?}", e);
-            }
-        });
-        log::info!(
-            "Successfully completed HTTP/1.1 handshake with {}:{}",
-            host,
-            port
-        );
-        Ok(HttpSender::H1(sender))
+            Ok((sender, "http/1.1".to_string()))
+        }
     }
 
     fn ssl_config_from_tls_config(tls_config: &TlsConfig) -> Result<SslConnector> {
-        log::debug!("Configuring TLS context with boringSSL");
+        log::debug!("Configuring TLS context"; "boringSSL" => format!("{:?}", tls_config));
         let mut ssl_builder = SslConnector::builder(SslMethod::tls())?;
         ssl_builder.set_alpn_protos(b"\x02h2\x08http/1.1")?; // TODO --http2 only flag to set ALPN to only h2
         log::debug!("Set ALPN protocols for HTTP/2 and HTTP/1.1");
@@ -239,7 +291,120 @@ impl Http2Client {
             tls_config.key.as_ref(),
         )
         .wrap_err("Failed to build boringSSL context")?;
-        log::info!("Successfully built TLS context for HTTP/2 client");
+        log::debug!("Built boringSSL context");
         Ok(ssl_builder.build())
+    }
+
+    async fn http2_handshake(
+        tcp: TokioIo<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>,
+        host: String,
+        port: u16,
+    ) -> Result<HttpSender> {
+        log::debug!("Initiating HTTP/2 handshake"; "peer" => format!("{}:{}", host, port));
+        let (sender, conn) =
+            hyper::client::conn::http2::handshake::<_, _, HttpBody>(TokioExecutor::new(), tcp)
+                .await
+                .wrap_err(format!("HTTP/2 handshake with {}:{} failed", host, port))?;
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                log::error!("Connection driver error: {:?}", e);
+            }
+        });
+        log::debug!("HTTP/2 handshake complete"; "peer" => format!("{}:{}", host, port));
+        Ok(HttpSender::H2(sender))
+    }
+
+    async fn http1_handshake(
+        tcp: TokioIo<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>,
+        host: String,
+        port: u16,
+    ) -> Result<HttpSender> {
+        log::debug!("Initiating HTTP/1.1 handshake"; "peer" => format!("{}:{}", host, port));
+        let (sender, conn) = hyper::client::conn::http1::Builder::new()
+            .handshake::<_, HttpBody>(tcp)
+            .await
+            .wrap_err(format!("HTTP/1.1 handshake with {}:{} failed", host, port))?;
+        tokio::spawn(async move {
+            if let Err(e) = conn.with_upgrades().await {
+                log::error!("proxy connection driver error: {:?}", e);
+            }
+        });
+        log::debug!("HTTP/1.1 handshake complete"; "peer" => format!("{}:{}", host, port));
+        Ok(HttpSender::H1(sender))
+    }
+
+    async fn connect(
+        mut sender: HttpSender,
+        target: String,
+        headers: Vec<String>,
+    ) -> Result<TokioIo<hyper::upgrade::Upgraded>> {
+        let request = RequestHandler::build_request("CONNECT", target.clone(), headers, None)?;
+
+        log::debug!("Connect request created";
+            "uri" => request.uri().to_string(),
+            "headers" => format!("{:?}", redact_headers(request.headers()))
+        );
+
+        let response: Response<Incoming> = sender.execute_request(request).await?;
+        if response.status() != 200 {
+            return Err(eyre!(
+                "CONNECT to {} failed with status: {}",
+                target,
+                response.status()
+            ));
+        }
+
+        log::info!("[CONNECT] Response status: {}", response.status());
+
+        log::debug!(
+            "Received response to CONNECT request";
+            "version" => format!("{:?}", response.version()),
+            "status" => response.status().to_string(),
+            "headers" => format!("{:?}", redact_headers(response.headers()))
+        );
+
+        let upgraded = tokio::time::timeout(
+            std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
+            hyper::upgrade::on(response),
+        )
+        .await
+        .map_err(|_| {
+            eyre!(
+                "CONNECT upgrade to {} timed out after {}s",
+                target,
+                REQUEST_TIMEOUT_SECONDS
+            )
+        })?
+        .map_err(|e| eyre!("Failed to upgrade CONNECT connection to {}: {e}", target))?;
+
+        log::info!("[CONNECT] Upgraded tunnel");
+
+        Ok(TokioIo::new(upgraded))
+    }
+
+    fn url_parts(peer: String) -> Result<(Scheme, String, u16)> {
+        let uri = peer
+            .parse::<hyper::Uri>()
+            .wrap_err("Failed to parse peer URL")?;
+        let Some(host) = uri.host() else {
+            return Err(eyre!("Peer URL must include host"));
+        };
+        let port = uri.port_u16().unwrap_or(match uri.scheme() {
+            Some(s) if s == &Scheme::HTTPS => 443,
+            _ => 80,
+        });
+
+        let Some(scheme) = uri.scheme() else {
+            return Err(eyre!("Peer URL must include scheme (http or https)"));
+        };
+
+        log::debug!(
+            "Parsed peer URL";
+            "uri" => uri.to_string(),
+            "scheme" => scheme.to_string(),
+            "host_and_port" => format!("{}:{}", host, port),
+            "path_and_query" => format!("{:?}", uri.path_and_query())
+        );
+        Ok((scheme.clone(), host.to_string(), port))
     }
 }

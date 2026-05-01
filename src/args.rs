@@ -4,6 +4,8 @@ use color_eyre::eyre::{Report, Result, eyre};
 use foundations::telemetry::log;
 use std::fs;
 
+use crate::client::redact_args;
+
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq)]
 pub enum Method {
     Get,
@@ -17,7 +19,7 @@ pub struct TlsConfig {
     pub key: Option<String>,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(name = "ferret", about = "A curl-like client for privacy protocols")]
 #[command(next_line_help = true)]
 pub struct Args {
@@ -61,7 +63,7 @@ pub struct Args {
     /// Use http3 for the request instead of the default http2.
     /// If used with --proxy, only the inner request will be http3.
     /// This requires the outer request to be http3 as well, specified with --proxy-http3.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "ohttp")]
     pub http3: bool,
 
     /** PROXYING */
@@ -70,7 +72,8 @@ pub struct Args {
     pub proxy: Option<String>,
 
     /// boolean flag to use ohttp, requires a proxy (see --proxy)
-    #[arg(short, long, requires = "proxy")]
+    /// to proxy over http3, use --proxy-http3.
+    #[arg(short, long, requires = "proxy", conflicts_with = "http3")]
     pub ohttp: bool,
 
     /// boolean flag to use http3 for the outer request to the proxy
@@ -202,15 +205,15 @@ impl Args {
         let warnings = [self.validate_basic()?, self.validate_proxy()?].concat();
         let active: Vec<_> = warnings.into_iter().filter(|(_, cond)| *cond).collect();
 
+        log::debug!("Validated args: {:?}", redact_args(self));
+
         if !active.is_empty() {
             log::info!("See --help for more information on valid arguments");
             for (msg, _) in active {
                 log::warn!("{}", msg);
             }
-            return Err(eyre!("Argument validation failed for {:?}", self));
+            return Err(eyre!("Argument validation failed for CLI argument input"));
         }
-
-        log::debug!("Validated args: {:?}", self);
 
         Ok(())
     }
@@ -272,7 +275,7 @@ impl Args {
             (
                 "--proxy paired with --http3 requires --proxy-http3 as we need the outer protocol to support http3 if the inner request is http3".to_string(),
                 self.http3 && self.proxy.is_some() && !self.proxy_http3,
-            )
+            ),
         ];
         Ok(warnings)
     }
@@ -285,17 +288,23 @@ impl Args {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RequestArgs {
     pub method: Method,
     pub url: String,
     pub headers: Vec<String>,
     pub body: Option<Bytes>,
+    pub proxy_connect: Option<String>,
+    pub proxy_tls_config: Option<TlsConfig>,
+    pub proxy_header: Vec<String>,
 }
 
 impl TryFrom<Args> for RequestArgs {
     type Error = Report;
     fn try_from(args: Args) -> Result<Self> {
+        let is_connect = args.proxy.is_some() && !args.ohttp;
+        let proxy_tls_config = is_connect.then(|| args.proxy_tls_config());
+        let proxy_header = is_connect.then(|| args.proxy_header).unwrap_or_default();
         Ok(RequestArgs {
             method: args.method.ok_or_else(|| {
                 eyre!("No method provided for RequestArgs conversion".to_string())
@@ -303,7 +312,24 @@ impl TryFrom<Args> for RequestArgs {
             url: args.url,
             headers: args.header,
             body: args.data.map(Bytes::from),
+            proxy_connect: is_connect.then(|| args.proxy.clone()).flatten(),
+            proxy_tls_config,
+            proxy_header,
         })
+    }
+}
+
+impl Default for RequestArgs {
+    fn default() -> Self {
+        Self {
+            method: Method::Get,
+            url: String::new(),
+            headers: vec![],
+            body: None,
+            proxy_header: vec![],
+            proxy_connect: None,
+            proxy_tls_config: None,
+        }
     }
 }
 

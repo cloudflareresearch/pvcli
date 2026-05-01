@@ -1,17 +1,15 @@
 pub mod body;
 pub mod connection;
-pub mod logging;
 
 use super::{HttpBody, HttpClient, HttpResponse, RequestHandler, log_and_execute_request};
 use crate::args::{RequestArgs, TlsConfig};
 use crate::client::cert::X509ConnectionHook;
-use crate::client::http3::logging::H3ConnectionLogger;
 use crate::client::request::REQUEST_TIMEOUT_SECONDS;
 
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use connection::SendRequest;
-use foundations::telemetry::{log, settings::Level};
+use foundations::telemetry::log;
 use http::Request;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -53,6 +51,9 @@ impl HttpClient for Http3Client {
             .new_connection(args.url.clone(), tls_config)
             .await
             .wrap_err("Failed to establish HTTP/3 connection")?;
+        log::info!("[HTTP/3] Connection ready";
+            "certs" => format!("{:?}", tls_config)
+        );
 
         let request =
             RequestHandler::build_request_wrapper(args).wrap_err("Failed to create request")?;
@@ -68,8 +69,8 @@ impl Http3Client {
         settings.verify_peer = true;
         settings.handshake_timeout = Some(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS));
         log::debug!(
-            "Initialized default QUIC settings for HTTP/3 Client: {:?}",
-            settings
+            "Initialized default QUIC settings for HTTP/3 Client";
+            "settings" => format!("{:?}", settings)
         );
 
         Ok(Self {
@@ -115,10 +116,6 @@ impl Http3Client {
             (None, None)
         };
         let hooks = Hooks { connection_hook };
-        log::info!(
-            "Successfully configured TLS for HTTP/3 connection with TlsConfig: {:?}",
-            tls_config
-        );
         Ok((dummy_tls, hooks))
     }
 
@@ -145,14 +142,13 @@ impl Http3Client {
         ))?;
         let socket = tokio_quiche::socket::Socket::try_from(socket)?;
 
-        log::info!("Successfully set up UDP socket connection to {}", peer_addr);
+        log::info!("[HTTP/3 UDP] Set up socket connection");
 
         let client = {
             let host = url.host_str();
             let (h3_driver, h3_driver_channel) = ClientH3Driver::new(Http3Settings::default());
             log::info!(
-                "Starting QUIC connection to {}, {}.",
-                url,
+                "[HTTP/3 QUIC] Starting connection, {}",
                 if let Some(timeout) = params.settings.handshake_timeout {
                     format!("timeout in {} seconds", timeout.as_secs())
                 } else {
@@ -172,21 +168,18 @@ impl Http3Client {
         let scid = Arc::new(client.quic_connection.scid().to_owned());
         let request_sender = client.request_sender();
         let shutdown = client.client_shutdown_sender();
-        log::info!("Successfully established QUIC connection, scid: {:?}", scid);
         log::add_fields!("quic_scid" => format!("{:.16}", format!("{:?}", scid))); // only print first 16 digits
+        log::info!("[HTTP/3 QUIC] Established connection");
 
         tokio::spawn({
             async move {
                 if let Err(error) = client.run().await {
-                    H3ConnectionLogger::log(
-                        Level::Error,
-                        format!("connect: h3 connection errored: {:?}", error),
+                    log::error!(
+                        "[HTTP/3 DRIVER] connect: h3 connection errored: {:?}",
+                        error
                     );
                 } else {
-                    H3ConnectionLogger::log(
-                        Level::Debug,
-                        format!("connect: h3 connection shutdown"),
-                    );
+                    log::debug!("[HTTP/3 DRIVER] connect: h3 connection shutdown");
                 };
             }
         });
@@ -203,6 +196,7 @@ impl Http3Client {
         request: Request<HttpBody>,
         connection: Http3Connection,
     ) -> Result<HttpResponse> {
+        log::info!("[HTTP/3] Sending request");
         let response = connection
             .request_sender
             .send_request(request)
@@ -236,11 +230,8 @@ impl Http3Client {
 
 impl Drop for Http3Connection {
     fn drop(&mut self) {
-        H3ConnectionLogger::log(
-            Level::Info,
-            format!(
-                "Dropping HTTP3Connection, sending shutdown signal (it's fine if the runtime exits before shutdown completes)."
-            ),
+        log::info!(
+            "[HTTP/3] Dropping HTTP3Connection, sending shutdown signal (it's fine if the runtime exits before shutdown completes)."
         );
         let _ = self.shutdown.send(ConnectionShutdownBehaviour {
             send_application_close: true,
