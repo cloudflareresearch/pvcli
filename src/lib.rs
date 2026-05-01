@@ -50,13 +50,14 @@ fn select_http_client(args: &Args) -> Result<HttpClientKind> {
             args.proxy.clone(),
             args.gateway_path.clone(),
             args.config_path.clone(),
+            &args.proxy_tls_config(),
         )?))
     } else if let Some(_proxy_url) = &args.proxy {
         Err(FerretError::Todo(
             "CONNECT proxying not implemented yet".to_string(),
         ))
     } else {
-        Ok(HttpClientKind::Http2(Http2Client::new()?))
+        Ok(HttpClientKind::Http2(Http2Client::new(&args.tls_config())?))
     }
 }
 

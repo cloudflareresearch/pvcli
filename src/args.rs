@@ -10,6 +10,10 @@ pub enum Method {
     Post,
 }
 
+pub struct TlsConfig<'a> {
+    pub cacert: Option<&'a str>,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "ferret", about = "A curl-like client for privacy protocols")]
 #[command(next_line_help = true)]
@@ -30,9 +34,14 @@ pub struct Args {
     #[arg(short = 'H', long)]
     pub header: Vec<String>,
 
-    #[arg(short, long, value_parser = parse_data)]
     /// ferret uses "Content-Type: application/x-www-form-urlencoded" by default. See --header to customize
+    #[arg(short, long, value_parser = parse_data)]
     pub data: Option<String>,
+
+    /// path to CA certificate (PEM format) for TLS validation.
+    /// If using --proxy, this is ignored. Use --proxy-cacert to specify a CA cert for the gateway when using OHTTP.
+    #[arg(long = "cacert")]
+    pub cacert: Option<String>,
 
     /// url to proxy for CONNECT or OHTTP
     #[arg(short = 'x', long)]
@@ -45,6 +54,10 @@ pub struct Args {
     /// path to OHTTP gateway config ("{proxy}/{config-path}")
     #[arg(long, default_value = "ohttp-config")]
     pub config_path: String,
+
+    /// path to CA certificate (PEM format) for validating the --proxy gateway's TLS certificate.
+    #[arg(long = "proxy-cacert")]
+    pub proxy_cacert: Option<String>,
 
     /// boolean flag to use ohttp, requires a proxy (see --proxy)
     #[arg(short, long, requires = "proxy")]
@@ -60,16 +73,54 @@ impl Default for Args {
             method: None,
             header: vec![],
             data: None,
+            cacert: None,
             proxy: None,
             gateway_path: "gateway".to_string(),
             config_path: "ohttp-config".to_string(),
             ohttp: false,
+            proxy_cacert: None,
         }
     }
 }
 
 impl Args {
+    pub fn proxy_tls_config(&self) -> TlsConfig<'_> {
+        TlsConfig {
+            cacert: self.proxy_cacert.as_deref(),
+        }
+    }
+
+    pub fn tls_config(&self) -> TlsConfig<'_> {
+        TlsConfig {
+            cacert: self.cacert.as_deref(),
+        }
+    }
+
+    /// Validates the provided arguments and prints all warnings, then errors if any warnings are found.
+    /// This is done to avoid silent failures where the client runs but doesn't behave as the user intended due to invalid args.
     pub fn validate(&mut self) -> Result<()> {
+        self.setup_args()?;
+
+        let warnings = [self.validate_basic()?, self.validate_ohttp()?].concat();
+        let active: Vec<_> = warnings.into_iter().filter(|(_, cond)| *cond).collect();
+
+        if !active.is_empty() {
+            log::info!("Use --help for more information on valid arguments");
+            for (msg, _) in active {
+                log::warn!("{}", msg);
+            }
+            return Err(FerretError::InvalidArg(format!(
+                "Argument validation failed for {:?}",
+                self,
+            )));
+        }
+
+        log::debug!("Validated args: {:?}", self);
+
+        Ok(())
+    }
+
+    fn setup_args(&mut self) -> Result<()> {
         if !self
             .header
             .iter()
@@ -83,26 +134,12 @@ impl Args {
             self.header.push(user_agent_header);
         }
 
-        if self.url.is_empty() {
-            return Err(FerretError::InvalidArg("URL is required".to_string()));
-        }
-
         let method = self.method.unwrap_or(if self.data.is_none() {
             Method::Get
         } else {
             Method::Post
         });
         self.method = Some(method);
-
-        if method == Method::Get && self.data.is_some() {
-            // curl allows data with GET
-            log::warn!("data argument (-d, --data) provided for GET request");
-        }
-        if method == Method::Post && self.data.is_none() {
-            return Err(FerretError::InvalidArg(
-                "no data argument (-d, --data) provided for POST request".to_string(),
-            ));
-        }
 
         // Standard content types for different types of requests
         if method == Method::Post
@@ -119,9 +156,39 @@ impl Args {
             self.header.push(default_content_type);
         }
 
-        log::debug!("Validated args: {:?}", self);
-
         Ok(())
+    }
+
+    fn validate_basic(&self) -> Result<Vec<(String, bool)>> {
+        let warnings: Vec<(String, bool)> = vec![
+            (
+                "URL is empty, must be provided".to_string(),
+                self.url.is_empty(),
+            ),
+            (
+                "data argument (-d, --data) provided for GET request".to_string(),
+                self.method == Some(Method::Get) && self.data.is_some(),
+            ),
+            (
+                "no data argument (-d, --data) provided for POST request".to_string(),
+                self.method == Some(Method::Post) && self.data.is_none(),
+            ),
+        ];
+        Ok(warnings)
+    }
+
+    fn validate_ohttp(&self) -> Result<Vec<(String, bool)>> {
+        let warnings: Vec<(String, bool)> = vec![
+            (
+                "--cacert is not used with --ohttp (gateway handles target TLS). Did you mean --proxy-cacert?".to_string(),
+                self.ohttp && self.cacert.is_some(),
+            ),
+            (
+                "--proxy-cacert is not used without --ohttp or --proxy".to_string(),
+                self.proxy.is_none() && self.proxy_cacert.is_some(),
+            ),
+        ];
+        Ok(warnings)
     }
 }
 

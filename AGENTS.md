@@ -42,6 +42,7 @@ ferret/
 | Logging configuration | `src/lib.rs` (`configure_logging`) |
 | Mock server routes | `tests/common/mod.rs` (`setup_mock_server`) |
 | Integration test cases | `tests/integration_tests.rs` |
+| TLS configuration | `src/args.rs` (`TlsConfig`) |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -50,6 +51,9 @@ ferret/
 | `run` | fn | `src/lib.rs` | Core request flow: validate args, select client, send request |
 | `select_http_client` | fn | `src/lib.rs` | Returns `HttpClientKind` based on args (OHTTP vs HTTP/2) |
 | `Args` | struct | `src/args.rs` | Clap-parsed CLI arguments |
+| `TlsConfig` | struct | `src/args.rs` | TLS configuration holder (cacert path) |
+| `Args::tls_config` | method | `src/args.rs` | Returns `TlsConfig` for target server TLS |
+| `Args::proxy_tls_config` | method | `src/args.rs` | Returns `TlsConfig` for proxy TLS |
 | `Args::validate` | method | `src/args.rs` | Infers method, adds default headers, validates POST has data |
 | `RequestArgs` | struct | `src/args.rs` | Validated request parameters (method, url, headers, body) |
 | `Method` | enum | `src/args.rs` | `Get` \| `Post` — case-insensitive via clap |
@@ -61,6 +65,7 @@ ferret/
 | `FerretError` | enum | `src/error.rs` | All error variants; implements `thiserror::Error` |
 | `consume_headers` | fn | `src/client/http2.rs` | Parses `"Key:Value"` header strings onto hyper request builder |
 
+
 ## CONVENTIONS
 - **Header format**: Headers are passed as `"Key:Value"` strings (colon-separated). See `src/client/http2.rs` `consume_headers`.
 - **HTTP/2 preferred**: `Http2Client` supports both HTTP/1.1 and HTTP/2 but prefers HTTP/2 when available.
@@ -68,6 +73,7 @@ ferret/
 - **Logging via foundations**: Use `foundations::telemetry::log` macros (`log::info!`, `log::debug!`, etc.), not `println!` or standard `log` crate.
 - **Error propagation**: Use `?` with `FerretError` variants; add new variants to `src/error.rs` rather than using `.unwrap()` in library code.
 - **OHTTP flow**: `fetch_proxy_key()` → `encrypt()` → `dispatch_outer_request()` → `decrypt()`
+- **TLS config**: Use `--cacert` for target server CA, `--proxy-cacert` for proxy CA (only with `--proxy`)
 
 ## COMMANDS
 ```bash
@@ -93,3 +99,4 @@ NOTES
 - OHTTP client uses workspace crates from ohttp-gateway-worker/ for HPKE encryption and BHTTP encoding.
 - Body responses are buffered fully into memory — not streamed.
 - The HttpResponse struct provides multiple body output formats: body_as_string_lossy(), body_as_string_escaped(), body_as_hex().
+- `--cacert` is ignored when using `--ohttp` (the gateway handles target TLS); use `--proxy-cacert` for proxy CA certs.

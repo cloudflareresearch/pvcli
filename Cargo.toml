@@ -60,6 +60,7 @@ rustls-native-certs = "0.8.3"
 rustls-pemfile = "2.2.0"
 thiserror = "1"
 url = "2"
+webpki-roots = "1.0.6"
 
 # Dev dependencies
 wiremock = "0.6"
@@ -79,6 +80,7 @@ authors = ["Hannah Wang <hwang@cloudflare.com>"]
 publish = false
 
 [dependencies]
+bytes = { workspace = true }
 clap = { workspace = true }
 foundations = { workspace = true }
 futures = { workspace = true }
@@ -96,7 +98,7 @@ rustls-native-certs = { workspace = true }
 rustls-pemfile = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-bytes = { workspace = true }
+webpki-roots = { workspace = true }
 
 stream-buf = { workspace = true }
 stream-octets = { workspace = true }

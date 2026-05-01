@@ -1,6 +1,6 @@
 use super::{Body, HttpClient, HttpResponse};
 use crate::Method;
-use crate::args::RequestArgs;
+use crate::args::{RequestArgs, TlsConfig};
 use crate::error::{FerretError, Result};
 
 use bytes::Bytes;
@@ -10,6 +10,10 @@ use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{Request, Response, body::Incoming};
 use hyper_rustls::HttpsConnector;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pemfile::certs;
+use std::fs::File;
+use std::io::BufReader;
 
 pub struct Http2Client {
     client: Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Body>,
@@ -23,18 +27,18 @@ impl HttpClient for Http2Client {
 }
 
 impl Http2Client {
-    pub fn new() -> Result<Self> {
+    pub fn new(tls_config: &TlsConfig) -> Result<Self> {
+        let root_store = build_root_store(tls_config.cacert)?;
+        let config = build_client_config(root_store)?;
+
         let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_native_roots()
-            .map_err(|e| {
-                FerretError::CertificateError(format!("failed to load native TLS roots: {}", e))
-            })?
+            .with_tls_config(config)
             .https_or_http()
             .enable_http2()
             .build();
 
         let client: Client<_, Body> = Client::builder(TokioExecutor::new())
-            // .http2_only(true) // --http2 flag to force this
+            // .http2_only(true) // TODO: --http2 flag to force this
             .build(https);
 
         log::trace!("Successfully initialized HTTP2 Client");
@@ -122,7 +126,57 @@ impl Http2Client {
                 log::warn!("Invalid header format: {}", h);
             }
         }
+
         log::debug!("Headers configured: {:?}", builder.headers_ref());
         Ok(builder)
     }
+}
+
+fn build_root_store(cacert: Option<&str>) -> Result<RootCertStore> {
+    log::debug!("Building root cert store");
+
+    // add standard browser certificates
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    // automatically add system CAs
+    // note: we need this if we're using WARP
+    let native_certs = rustls_native_certs::load_native_certs();
+    for cert in native_certs.certs {
+        root_store.add(cert)?;
+    }
+    for err in &native_certs.errors {
+        log::warn!("Failed to load native cert: {}", err);
+    }
+
+    // custom certificate
+    if let Some(ca_path) = cacert {
+        log::debug!(
+            "Loading Http2Client config with cacert (--proxy-cacert/--cacert) at path {}",
+            ca_path
+        );
+        let mut reader = BufReader::new(File::open(ca_path).map_err(|e| {
+            FerretError::CertificateError(format!("failed to open CA cert '{}': {}", ca_path, e))
+        })?);
+        for cert in certs(&mut reader) {
+            let cert = cert.map_err(|e| {
+                FerretError::CertificateError(format!(
+                    "failed to parse CA cert (must be PEM format): {}",
+                    e
+                ))
+            })?;
+            root_store.add(cert)?;
+        }
+        log::info!("Loaded custom CA cert from {}", ca_path);
+    }
+    Ok(root_store)
+}
+
+fn build_client_config(root_store: RootCertStore) -> Result<ClientConfig> {
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    log::info!("Successfully built TLS client config");
+    Ok(config)
 }

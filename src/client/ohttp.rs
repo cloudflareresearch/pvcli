@@ -1,7 +1,7 @@
 use super::{HttpClient, HttpResponse};
 use crate::{
     Http2Client,
-    args::{Method, RequestArgs},
+    args::{Method, RequestArgs, TlsConfig},
     error::{FerretError, Result},
 };
 use bytes::Bytes;
@@ -41,6 +41,7 @@ impl OHttpClient {
         proxy_url: Option<String>,
         gateway_path: String,
         config_path: String,
+        proxy_tls_config: &TlsConfig,
     ) -> Result<Self> {
         let Some(proxy_url) = proxy_url else {
             return Err(FerretError::InvalidArg(
@@ -60,7 +61,7 @@ impl OHttpClient {
         log::debug!("Constructed OHTTP config URL: {}", key_config_url);
 
         Ok(Self {
-            proxy_http_client: Http2Client::new()?,
+            proxy_http_client: Http2Client::new(proxy_tls_config)?,
             proxy_config_url: key_config_url,
             proxy_gateway_url: gateway_url,
         })
@@ -271,6 +272,7 @@ mod unit_tests {
             args.proxy.clone(),
             args.gateway_path.clone(),
             args.config_path.clone(),
+            &args.proxy_tls_config(),
         )
         .expect("Failed to create OHTTP client with provided proxy URL");
         let result = ohttp_client.fetch_proxy_key().await;
