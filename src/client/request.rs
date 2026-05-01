@@ -19,7 +19,7 @@ pub const REQUEST_TIMEOUT_SECONDS: u64 = 10;
 pub struct RequestHandler;
 
 impl RequestHandler {
-    pub fn create_request(args: RequestArgs) -> Result<Request<HttpBody>> {
+    pub fn build_request_wrapper(args: RequestArgs) -> Result<Request<HttpBody>> {
         match args.method {
             Method::Get => RequestHandler::build_request("GET", args.url, args.headers, None),
             Method::Post => {
@@ -66,13 +66,14 @@ impl RequestHandler {
         };
 
         let request = builder.body(body).wrap_err("Failed to build request")?;
-        log::trace!("Request built: {:?}", request);
+        log::debug!("Request built: {:?}", request);
         log::info!("Successfully built {} request to {}", method, url);
 
         Ok(request)
     }
 
     fn consume_headers(mut builder: Builder, headers: Vec<String>) -> Result<Builder> {
+        log::debug!("Parsing headers: {:?}", headers);
         for h in &headers {
             if let Some((key, header)) = h.split_once(":") {
                 log::trace!("Adding header: {}: {}", key.trim(), header.trim());

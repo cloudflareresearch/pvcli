@@ -31,6 +31,8 @@ pub struct Args {
     #[arg(short, long)]
     pub silent: bool,
 
+    /// HTTP method to use, defaults to GET or POST based on presence of --data
+    /// In proxying contexts, this is the method for the inner request.
     #[arg(short = 'X', long, ignore_case = true)]
     pub method: Option<Method>,
 
@@ -63,10 +65,17 @@ pub struct Args {
     pub http3: bool,
 
     /** PROXYING */
-
-    /// url to proxy for CONNECT or OHTTP
+    /// url to proxy for CONNECT proxying or OHTTP
     #[arg(short = 'x', long)]
     pub proxy: Option<String>,
+
+    /// boolean flag to use ohttp, requires a proxy (see --proxy)
+    #[arg(short, long, requires = "proxy")]
+    pub ohttp: bool,
+
+    /// boolean flag to use http3 for the outer request to the proxy
+    #[arg(long, requires = "proxy")]
+    pub proxy_http3: bool,
 
     /// path to OHTTP gateway ("{proxy}/{gateway_path}")
     #[arg(long, default_value = "gateway", requires = "proxy")]
@@ -91,14 +100,6 @@ pub struct Args {
     /// path to key certificate (PEM format) for TLS validation --proxy.
     #[arg(long, requires = "proxy", requires = "proxy_client")]
     pub proxy_key: Option<String>,
-
-    /// boolean flag to use ohttp, requires a proxy (see --proxy)
-    #[arg(short, long, requires = "proxy")]
-    pub ohttp: bool,
-
-    /// boolean flag to use http3 for the outer request to the proxy
-    #[arg(long, requires = "proxy")]
-    pub proxy_http3: bool,
 
     /// relay URL for OHTTP, if different from proxy URL
     #[arg(long, requires = "proxy")]

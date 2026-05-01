@@ -75,7 +75,7 @@ async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> 
         ));
     }
 
-    if let Some(_proxy_url) = &args.proxy {
+    if args.proxy.is_some() {
         return Err(eyre!("CONNECT proxying not implemented yet"));
     }
 

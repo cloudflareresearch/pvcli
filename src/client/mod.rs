@@ -49,12 +49,12 @@ impl HttpClient for HttpClientKind {
     }
 }
 
-pub enum ProxyClientKind {
+pub enum TransportClientKind {
     Http2(Http2Client),
     Http3(Http3Client),
 }
 
-impl HttpClient for ProxyClientKind {
+impl HttpClient for TransportClientKind {
     async fn send_request(&self, req: RequestArgs, tls_config: &TlsConfig) -> Result<HttpResponse> {
         match self {
             Self::Http2(c) => c

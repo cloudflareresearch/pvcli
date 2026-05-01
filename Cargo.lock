@@ -1204,6 +1204,7 @@ dependencies = [
  "test-case",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-boring",
  "tokio-quiche",
  "tokio-util",
  "url",

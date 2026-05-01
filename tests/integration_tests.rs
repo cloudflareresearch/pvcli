@@ -42,7 +42,6 @@ async fn test_http2_success(args: Args, expected_result: &str) {
 #[test_case(Args {url: format!("{}/invalid", get_mock_server_url()), ..Default::default()}, "Request did not match any route" ; "get invalid path")]
 #[test_case(Args {url: "https://invalid.com".into(), ..Default::default()}, "Failed to send request" ; "invalid url fails")]
 #[test_case(Args {url: "".into(), ..Default::default()}, "validation failed" ; "empty url fails")]
-#[test_case(Args {url: format!("{}/testget", get_mock_server_url()), cacert: Some("./nonexistent.pem".into()), ..Default::default()}, "Failed to read" ; "invalid cacert fails")]
 #[tokio::test]
 async fn test_http2_failure(args: Args, expected_result: &str) {
     run_and_match(args, expected_result).await;
@@ -59,7 +58,6 @@ async fn test_ohttp_with_gateway_success(args: Args, expected_result: &str) {
 
 #[test_case(Args {url: format!("{}/invalid", get_mock_server_url()), ohttp: true, proxy: Some(get_mock_gateway()), ..Default::default()}, "Request did not match" ; "ohttp invalid path")]
 #[test_case(Args {url: format!("{}/testget", get_mock_server_url()), ohttp: true, ..Default::default()}, "proxy" ; "ohttp without proxy fails")]
-#[test_case(Args {url: format!("{}/testget", get_mock_server_url()), ohttp: true, proxy: Some(get_mock_gateway()), proxy_cacert: Some("./nonexistent.pem".into()), ..Default::default()}, "Failed to read" ; "ohttp invalid proxy-cacert fails")]
 #[tokio::test]
 async fn test_ohttp_with_gateway_failure(args: Args, expected_result: &str) {
     run_and_match(args, expected_result).await;

@@ -54,10 +54,11 @@ impl HttpClient for Http3Client {
             .await
             .wrap_err("Failed to establish HTTP/3 connection")?;
 
-        let request = RequestHandler::create_request(args).wrap_err("Failed to create request")?;
+        let request =
+            RequestHandler::build_request_wrapper(args).wrap_err("Failed to create request")?;
         log_and_execute_request(request, |req| self.execute(req, connection))
             .await
-            .wrap_err("Failed to dispatch HTTP/3 request")
+            .wrap_err("Failed to execute HTTP/3 request")
     }
 }
 

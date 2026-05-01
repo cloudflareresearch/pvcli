@@ -2,7 +2,7 @@ use super::{HttpClient, HttpResponse, RequestHandler};
 use crate::{
     Http2Client, Http3Client,
     args::{Method, RequestArgs, TlsConfig},
-    client::ProxyClientKind,
+    client::TransportClientKind,
     error::FerretError,
 };
 
@@ -22,7 +22,7 @@ const MESSAGE_BHTTP_REQUEST: &str = "message/bhttp request";
 const MESSAGE_BHTTP_RESPONSE: &str = "message/bhttp response";
 
 pub struct OHttpClient {
-    proxy_http_client: ProxyClientKind,
+    proxy_http_client: TransportClientKind,
     proxy_headers: Vec<String>,
     proxy_config_url: String,
     proxy_gateway_url: String,
@@ -87,16 +87,16 @@ impl OHttpClient {
         log::debug!("Constructed OHTTP gateway URL: {}", gateway_url);
         log::debug!("Constructed OHTTP config URL: {}", key_config_url);
 
-        let proxy_http_client: ProxyClientKind = if proxy_http3 {
+        let proxy_http_client: TransportClientKind = if proxy_http3 {
             log::info!("Using HTTP/3 client for OHTTP proxy communication");
-            ProxyClientKind::Http3(
+            TransportClientKind::Http3(
                 Http3Client::new()
                     .await
                     .wrap_err("Failed to initialize HTTP/3 client for OHTTP proxy")?,
             )
         } else {
             log::info!("Using HTTP/2 client for OHTTP proxy communication");
-            ProxyClientKind::Http2(Http2Client {})
+            TransportClientKind::Http2(Http2Client {})
         };
 
         log::info!("Successfully initialized OHTTP Client");
@@ -242,8 +242,8 @@ impl OHttpClient {
         log::trace!("Response receiving context: {:?}", response_receiving_ctx);
 
         // the actual request you want to send through OHTTP
-        let inner_request =
-            RequestHandler::create_request(args).wrap_err("Failed to create inner request")?;
+        let inner_request = RequestHandler::build_request_wrapper(args)
+            .wrap_err("Failed to create inner request")?;
         let bhttp_encoded =
             encode_request(inner_request).wrap_err("Failed to encode inner request")?;
 
