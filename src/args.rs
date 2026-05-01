@@ -49,18 +49,18 @@ pub struct Args {
     #[arg(long)]
     pub http3: bool,
 
-    /** PROXYING AND OHTTP */
+    /** PROXYING */
 
     /// url to proxy for CONNECT or OHTTP
     #[arg(short = 'x', long)]
     pub proxy: Option<String>,
 
     /// path to OHTTP gateway ("{proxy}/{gateway_path}")
-    #[arg(long, default_value = "gateway")]
+    #[arg(long, default_value = "gateway", requires = "proxy")]
     pub gateway_path: String,
 
     /// path to OHTTP gateway config ("{proxy}/{config-path}")
-    #[arg(long, default_value = "ohttp-config")]
+    #[arg(long, default_value = "ohttp-config", requires = "proxy")]
     pub config_path: String,
 
     /// path to CA certificate (PEM format) for validating the --proxy gateway's TLS certificate.

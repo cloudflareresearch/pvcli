@@ -18,6 +18,5 @@ ohttp-gateway-worker/node_modules/
 ohttp-gateway-worker/.wrangler
 node_modules/
 package*
-private_certs/node_modules/
 package-lock.json
 package.json
