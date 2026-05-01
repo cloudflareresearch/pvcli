@@ -1,6 +1,6 @@
 # ferret
 
-A Rust HTTP client library.
+A Rust HTTP client library implementing HTTP/2.
 
 ## License
 

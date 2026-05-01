@@ -1,6 +1,19 @@
 [package]
-name = "hwang_onboarding"
+name = "ferret"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["client", "http2"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
+hyper-rustls = { version = "0.27", features = ["http2"] }
+http-body-util = "0.1"
+rustls = "0.23"
+thiserror = "1"
+url = "2"
+bytes = "1"
+
+[dev-dependencies]
+wiremock = "0.6"
