@@ -1,0 +1,39 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/ohttp-config"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 120s
+    command: >
+      sh -c "
+        cd ohttp-gateway-worker &&
+        npm install &&
+        exec npx wrangler dev --port 8787 --ip 0.0.0.0
+      "
+
+  test-runner:
+    depends_on:
+      gateway:
+        condition: service_healthy
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - GATEWAY_URL=http://gateway:8787
+    command: >
+      sh -c "
+        set -e
+        cargo fmt --check
+        cargo test
+      "

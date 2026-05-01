@@ -1,0 +1,5 @@
+ohttp-gateway-worker/build
+target
+.git
+*.log
+/tmp

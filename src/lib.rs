@@ -1,11 +1,10 @@
 pub mod args;
+mod client;
 pub mod error;
-pub mod http;
 
 pub use args::{Args, Method};
-use bytes::Bytes;
-pub use error::FerretError;
-pub use http::{HttpClient, HttpResponse};
+pub use client::{Http2Client, HttpClient, HttpClientKind, HttpResponse, OHttpClient};
+pub use error::{FerretError, Result};
 
 use clap::Parser;
 use foundations::{
@@ -20,75 +19,45 @@ pub async fn tunnel() {
     let args = Args::parse();
     let mut driver = configure_logging(&args).expect("error configuring telemetry logging");
 
-    let result = async {
-        let args = validate_args(args)?;
-        send_request(args).await
-    }
-    .await;
+    let result = run_handle_error(args).await;
 
-    match result {
-        Ok(body) => println!("{}", body),
-        Err(e) => log::error!("{}", e),
-    };
-
-    // see https://github.com/cloudflare/foundations/pull/168 for fix
-    // remove Cargo.toml patch once merged
     driver.shutdown_logger();
+    print!("{}", result);
 }
 
-async fn send_request(args: Args) -> Result<String, FerretError> {
-    let client = HttpClient::new()?;
-    let url = &args.url;
-    let headers = args.header.unwrap_or_default();
-
-    let response = match args.method {
-        Some(Method::Get) => client.get(url, headers).await?,
-        Some(Method::Post) => {
-            client
-                .post(url, headers, Bytes::from(args.data.unwrap()))
-                .await?
+pub async fn run_handle_error(args: Args) -> String {
+    match run(args).await {
+        Ok(body) => body,
+        Err(e) => {
+            log::error!("{}", e);
+            String::new()
         }
-        None => return Err(FerretError::InvalidArg("No method provided".to_string())),
-    };
-
-    Ok(response.body)
+    }
 }
 
-fn validate_args(mut args: Args) -> Result<Args, FerretError> {
-    let method = args.method.unwrap_or(if args.data.is_none() {
-        Method::Get
+pub async fn run(mut args: Args) -> Result<String> {
+    args.validate()?;
+    let client = select_http_client(&args)?;
+    client
+        .send_request(args.try_into()?)
+        .await?
+        .body_as_string_lossy()
+}
+
+fn select_http_client(args: &Args) -> Result<HttpClientKind> {
+    if args.ohttp {
+        Ok(HttpClientKind::OHttp(OHttpClient::new(
+            args.proxy.clone(),
+            args.gateway_path.clone(),
+            args.config_path.clone(),
+        )?))
+    } else if let Some(_proxy_url) = &args.proxy {
+        Err(FerretError::Todo(
+            "CONNECT proxying not implemented yet".to_string(),
+        ))
     } else {
-        Method::Post
-    });
-    args.method = Some(method);
-
-    if method == Method::Get && args.data.is_some() {
-        log::warn!("data argument (-d, --data) provided for GET request");
+        Ok(HttpClientKind::Http2(Http2Client::new()?))
     }
-    if method == Method::Post {
-        if args.header.as_ref().is_none_or(|headers| {
-            !headers
-                .iter()
-                .any(|h| h.to_ascii_lowercase().contains("content-type"))
-        }) {
-            log::warn!(
-                "Header (-H, --header) does not contain \"Content-Type\", defaulting to application/x-www-form-urlencoded"
-            );
-            args.header
-                .get_or_insert(Vec::new())
-                .push("Content-Type:application/x-www-form-urlencoded".to_string());
-        }
-
-        if args.data.is_none() {
-            return Err(FerretError::InvalidArg(
-                "no data argument (-d, --data) provided for POST request".to_string(),
-            ));
-        }
-    }
-
-    log::debug!("{:?}", args);
-
-    Ok(args)
 }
 
 fn configure_logging(args: &Args) -> BootstrapResult<TelemetryDriver> {
@@ -120,31 +89,28 @@ fn configure_logging(args: &Args) -> BootstrapResult<TelemetryDriver> {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::{Args, validate_args};
+    use crate::Args;
     use clap::Parser;
     use test_case::test_case;
 
     #[test_case(&["ferret", "https://test_url.com"], true, "get" ; "default get")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata"], true, "post" ; "default post")]
+    #[test_case(&["ferret", "https://test_url.com", "-d", "@./tests/testdata.txt"], true, "hello world" ; "post data with filepath")]
     #[test_case(&["ferret", "https://test_url.com", "-X", "post"], false, "" ; "post without data")]
-    #[test_case(&["ferret", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "post without header")]
+    #[test_case(&["ferret", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "http2 without header")]
+    #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "message/ohttp-req" ; "ohttp without header")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
-    fn test_args_validation(case: &[&str], should_pass: bool, should_contain: &str) {
-        let args = Args::parse_from(case);
-        let result = validate_args(args);
+    fn test_args_validation(case: &[&str], expect_pass: bool, expected_contain: &str) {
+        let mut args = Args::parse_from(case);
+        let result = args.validate();
 
-        if should_pass {
-            assert!(result.is_ok());
-            if !should_contain.is_empty() {
-                let validated = result.unwrap();
-                let all_fields = format!(
-                    "{:?} {:?} {:?}",
-                    validated.method, validated.header, validated.data
-                );
-                assert!(all_fields.to_lowercase().contains(should_contain));
-            }
+        if expect_pass {
+            assert!(result.is_ok(), "result should be Ok()");
+            let all_fields =
+                format!("{:?} {:?} {:?}", args.method, args.header, args.data).to_lowercase();
+            assert!(all_fields.contains(expected_contain));
         } else {
-            assert!(result.is_err());
+            assert!(result.is_err(), "should have failed");
         }
     }
 }

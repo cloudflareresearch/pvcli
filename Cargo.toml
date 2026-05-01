@@ -52,9 +52,12 @@ getrandom = { version = "0.2", features = ["js"] }
 # Ferret deps
 clap = { version = "4", features = ["derive"] }
 foundations = { git = "https://github.com/cloudflare/foundations.git", rev = "ff3d380", features = ["platform-common-default"] }
+hex = "0.4.3"
 httpmock = "0.8.3"
 tokio = { version = "1", features = ["full", "macros", "net", "rt"] }
 rustls = "0.23"
+rustls-native-certs = "0.8.3"
+rustls-pemfile = "2.2.0"
 thiserror = "1"
 url = "2"
 
@@ -80,15 +83,24 @@ clap = { workspace = true }
 foundations = { workspace = true }
 httpmock = { workspace = true }
 tokio = { workspace = true }
+hex = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 hyper-rustls = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+rustls-pemfile = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 bytes = { workspace = true }
+
+stream-buf = { workspace = true }
+stream-octets = { workspace = true }
+ohttp-hpke = { workspace = true }
+hyper-binary = { workspace = true }
+
 
 [dev-dependencies]
 wiremock = { workspace = true }
