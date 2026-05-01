@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+foundations = { version = "5.4.0", features = ["platform-common-default"] }
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }

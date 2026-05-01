@@ -1,6 +1,7 @@
 use crate::error::Result;
 
 use bytes::Bytes;
+use foundations::telemetry::log;
 use http_body_util::{BodyExt, Empty};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
@@ -30,11 +31,11 @@ impl HttpClient {
     }
 
     pub async fn get(&self, url: &str) -> Result<HttpResponse> {
-        println!("Fetching {}", url);
-        println!("Using HTTP/2");
+        log::info!("Fetching {}", url);
+        log::debug!("Using HTTP/2");
         let uri = url.parse::<hyper::Uri>()?;
 
-        println!(
+        log::debug!(
             "Parsed URI - scheme: {:?}, host: {:?}, path: {}",
             uri.scheme_str(),
             uri.host(),
@@ -48,21 +49,21 @@ impl HttpClient {
             .body(Empty::<Bytes>::new())
             .expect("failed to build request");
 
-        println!("Sending request: {:?}", request);
+        log::info!("Sending request: {:?}", request);
 
         let response: Response<Incoming> = self.client.request(request).await?;
 
         let status = response.status().as_u16();
         let headers = response.headers().clone();
 
-        println!("Status: {}", status);
-        println!("Headers: {:?}", headers);
+        log::info!("Status: {}", status);
+        log::debug!("Headers: {:?}", headers);
 
         // collect body
         let body_bytes = response.into_body().collect().await?.to_bytes(); // TODO: ? stream for bigger response sizes
         let body = String::from_utf8_lossy(&body_bytes).to_string();
 
-        println!("Body length: {} bytes", body.len());
+        log::debug!("Body length: {} bytes", body.len());
 
         Ok(HttpResponse { status, body })
     }
