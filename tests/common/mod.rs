@@ -123,7 +123,7 @@ impl MockRelay {
                 }
                 Err(e) => Response::builder()
                     .status(502)
-                    .body(Body::from(format!("relay failed: {}", e)))
+                    .body(Body::from(format!("relay failed: {:?}", e)))
                     .unwrap(),
             }
         }

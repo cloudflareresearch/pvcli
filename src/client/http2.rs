@@ -1,9 +1,9 @@
 use super::{Body, HttpClient, HttpResponse};
 use crate::Method;
 use crate::args::{RequestArgs, TlsConfig};
-use crate::error::{FerretError, Result};
 
 use bytes::Bytes;
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use foundations::telemetry::log;
 use http::request::Builder;
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
@@ -21,15 +21,20 @@ pub struct Http2Client {
 
 impl HttpClient for Http2Client {
     async fn send_request(&self, args: RequestArgs) -> Result<HttpResponse> {
-        let request = self.create_request(args)?;
-        self.dispatch_request(request).await
+        let request = self
+            .create_request(args)
+            .wrap_err("Failed to create request")?;
+        self.dispatch_request(request)
+            .await
+            .wrap_err("Failed to dispatch request")
     }
 }
 
 impl Http2Client {
     pub fn new(tls_config: &TlsConfig) -> Result<Self> {
-        let root_store = build_root_store(tls_config.cacert)?;
-        let config = build_client_config(root_store)?;
+        let root_store =
+            build_root_store(tls_config.cacert).wrap_err("Failed to build root store")?;
+        let config = build_client_config(root_store).wrap_err("Failed to build client config")?;
 
         let https = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(config)
@@ -41,7 +46,7 @@ impl Http2Client {
             // .http2_only(true) // TODO: --http2 flag to force this
             .build(https);
 
-        log::trace!("Successfully initialized HTTP2 Client");
+        log::debug!("Successfully initialized HTTP2 Client");
         Ok(Self { client })
     }
 
@@ -49,9 +54,7 @@ impl Http2Client {
         match args.method {
             Method::Get => self.build_request("GET", args.url, args.headers, None),
             Method::Post => {
-                let body = args.body.ok_or(FerretError::InvalidArg(
-                    "POST request requires a body".into(),
-                ))?;
+                let body = args.body.ok_or(eyre!("POST request requires a body"))?;
                 self.build_request("POST", args.url, args.headers, Some(body))
             }
         }
@@ -68,35 +71,48 @@ impl Http2Client {
 
         let uri = url.parse::<hyper::Uri>()?;
 
-        log::trace!(
-            "Parsed URI - scheme: {:?}, host: {:?}, path: {}",
+        if uri.scheme_str().is_none() {
+            return Err(eyre!("URL must include scheme (http:// or https://)"));
+        }
+
+        log::debug!(
+            "Parsed URI: scheme: {:?}, host: {:?}, path: {}",
             uri.scheme_str(),
             uri.host(),
             uri.path()
         );
 
+        log::trace!(
+            "Building request with headers: {:?}, body: {:?}",
+            headers,
+            body
+        );
+
         let builder = Request::builder().method(method).uri(&uri);
-        let builder = self.consume_headers(builder, headers)?;
+        let builder = self
+            .consume_headers(builder, headers)
+            .wrap_err("Failed to consume headers")?;
 
         let body: Body = match body {
             Some(b) => BoxBody::new(Full::new(b).map_err(|_| unreachable!())),
             None => BoxBody::new(Empty::<Bytes>::new().map_err(|_| unreachable!())),
         };
 
-        let request = builder.body(body).expect("failed to build request");
+        let request = builder.body(body).wrap_err("Failed to build request")?;
         log::trace!("Request built: {:?}", request);
+        log::info!("Successfully built HTTP/2 {} request to {}", method, url);
+
         Ok(request)
     }
 
     pub async fn dispatch_request(&self, request: Request<Body>) -> Result<HttpResponse> {
-        log::debug!("Dispatching request to {:?}", request.uri());
         log::trace!("Full request details: {:?}", request);
 
-        let response: Response<Incoming> = self
-            .client
-            .request(request)
-            .await
-            .map_err(FerretError::ClientError)?;
+        let request_uri = request.uri().to_string();
+        let response: Response<Incoming> =
+            self.client.request(request).await.wrap_err_with(|| {
+                format!("HTTP/2 dispatching request to {} failed", request_uri)
+            })?;
 
         let http_response = HttpResponse {
             version: response.version(),
@@ -105,7 +121,7 @@ impl Http2Client {
             body: response.into_body().collect().await?.to_bytes(),
         };
 
-        log::info!("Successfully received response");
+        log::info!("Successfully received response from {}", request_uri);
         http_response.log_response();
 
         Ok(http_response)
@@ -117,9 +133,9 @@ impl Http2Client {
                 log::trace!("Adding header: {}: {}", key.trim(), header.trim());
                 builder = builder.header(
                     http::header::HeaderName::from_bytes(key.trim().as_bytes())
-                        .map_err(|e| FerretError::InvalidArg(format!("bad header name: {e}")))?,
+                        .wrap_err_with(|| format!("bad header name: {}", key))?,
                     http::header::HeaderValue::from_str(header.trim())
-                        .map_err(|e| FerretError::InvalidArg(format!("bad header value: {e}")))?,
+                        .wrap_err_with(|| format!("bad header value: {}", header))?,
                 );
             } else {
                 // match curl behavior: warn but continue without malformed header
@@ -146,7 +162,7 @@ fn build_root_store(cacert: Option<&str>) -> Result<RootCertStore> {
         root_store.add(cert)?;
     }
     for err in &native_certs.errors {
-        log::warn!("Failed to load native cert: {}", err);
+        log::warn!("Failed to load native cert: {:?}", err);
     }
 
     // custom certificate
@@ -155,16 +171,12 @@ fn build_root_store(cacert: Option<&str>) -> Result<RootCertStore> {
             "Loading Http2Client config with cacert (--proxy-cacert/--cacert) at path {}",
             ca_path
         );
-        let mut reader = BufReader::new(File::open(ca_path).map_err(|e| {
-            FerretError::CertificateError(format!("failed to open CA cert '{}': {}", ca_path, e))
-        })?);
+        let mut reader = BufReader::new(
+            File::open(ca_path)
+                .wrap_err_with(|| format!("Failed to open CA cert at {} ", ca_path))?,
+        );
         for cert in certs(&mut reader) {
-            let cert = cert.map_err(|e| {
-                FerretError::CertificateError(format!(
-                    "failed to parse CA cert (must be PEM format): {}",
-                    e
-                ))
-            })?;
+            let cert = cert.wrap_err("Failed to parse CA cert (must be PEM format)")?;
             root_store.add(cert)?;
         }
         log::info!("Loaded custom CA cert from {}", ca_path);

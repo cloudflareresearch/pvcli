@@ -4,9 +4,9 @@ pub mod error;
 
 pub use args::{Args, Method};
 pub use client::{Http2Client, HttpClient, HttpClientKind, HttpResponse, OHttpClient};
-pub use error::{FerretError, Result};
 
 use clap::Parser;
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use foundations::{
     BootstrapResult,
     telemetry::{
@@ -18,6 +18,11 @@ use foundations::{
 pub async fn tunnel() {
     let args = Args::parse();
     let mut driver = configure_logging(&args).expect("error configuring telemetry logging");
+    if let Err(e) = color_eyre::install() {
+        // enable for better error messages
+        log::error!("Failed to install color_eyre: {:?}", e);
+        // Proceeding without color_eyre, but error messages may be less informative
+    }
 
     let result = run_handle_error(args).await;
 
@@ -29,7 +34,8 @@ pub async fn run_handle_error(args: Args) -> String {
     match run(args).await {
         Ok(body) => body,
         Err(e) => {
-            log::error!("{}", e);
+            log::error!("{:?}", e);
+            log::error!("See -v for info, -vv for debug, -vvv for trace logs");
             String::new()
         }
     }
@@ -46,19 +52,22 @@ pub async fn run(mut args: Args) -> Result<String> {
 
 fn select_http_client(args: &Args) -> Result<HttpClientKind> {
     if args.ohttp {
-        Ok(HttpClientKind::OHttp(OHttpClient::new(
-            args.proxy.clone(),
-            args.gateway_path.clone(),
-            args.config_path.clone(),
-            args.first_hop.clone(),
-            &args.proxy_tls_config(),
-        )?))
-    } else if let Some(_proxy_url) = &args.proxy {
-        Err(FerretError::Todo(
-            "CONNECT proxying not implemented yet".to_string(),
+        Ok(HttpClientKind::OHttp(
+            OHttpClient::new(
+                args.proxy.clone(),
+                args.gateway_path.clone(),
+                args.config_path.clone(),
+                args.first_hop.clone(),
+                &args.proxy_tls_config(),
+            )
+            .wrap_err("OHTTP Client initialization error")?,
         ))
+    } else if let Some(_proxy_url) = &args.proxy {
+        Err(eyre!("CONNECT proxying not implemented yet"))
     } else {
-        Ok(HttpClientKind::Http2(Http2Client::new(&args.tls_config())?))
+        Ok(HttpClientKind::Http2(
+            Http2Client::new(&args.tls_config()).wrap_err("HTTP/2 Client initialization error")?,
+        ))
     }
 }
 

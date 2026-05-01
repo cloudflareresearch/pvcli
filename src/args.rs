@@ -1,6 +1,6 @@
-use crate::error::{FerretError, Result};
 use bytes::Bytes;
 use clap::Parser;
+use color_eyre::eyre::{Report, Result, eyre};
 use foundations::telemetry::log;
 use std::fs;
 
@@ -110,14 +110,11 @@ impl Args {
         let active: Vec<_> = warnings.into_iter().filter(|(_, cond)| *cond).collect();
 
         if !active.is_empty() {
-            log::info!("Use --help for more information on valid arguments");
+            log::info!("See --help for more information on valid arguments");
             for (msg, _) in active {
                 log::warn!("{}", msg);
             }
-            return Err(FerretError::InvalidArg(format!(
-                "Argument validation failed for {:?}",
-                self,
-            )));
+            return Err(eyre!("Argument validation failed for {:?}", self));
         }
 
         log::debug!("Validated args: {:?}", self);
@@ -208,11 +205,11 @@ pub struct RequestArgs {
 }
 
 impl TryFrom<Args> for RequestArgs {
-    type Error = FerretError;
+    type Error = Report;
     fn try_from(args: Args) -> Result<Self> {
         Ok(RequestArgs {
             method: args.method.ok_or_else(|| {
-                FerretError::InvalidArg("No method provided for RequestArgs conversion".to_string())
+                eyre!("No method provided for RequestArgs conversion".to_string())
             })?,
             url: args.url,
             headers: args.header,

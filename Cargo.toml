@@ -51,6 +51,7 @@ getrandom = { version = "0.2", features = ["js"] }
 
 # Ferret deps
 clap = { version = "4", features = ["derive"] }
+color-eyre = "0.6.5"
 foundations = { git = "https://github.com/cloudflare/foundations.git", rev = "ff3d380", features = ["platform-common-default"] }
 hex = "0.4.3"
 tokio = { version = "1", features = ["full", "macros", "net", "rt"] }
@@ -83,6 +84,7 @@ publish = false
 [dependencies]
 bytes = { workspace = true }
 clap = { workspace = true }
+color-eyre = { workspace = true }
 foundations = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }

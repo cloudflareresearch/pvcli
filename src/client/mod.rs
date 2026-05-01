@@ -5,13 +5,13 @@ pub use http2::Http2Client;
 pub use ohttp::OHttpClient;
 
 use crate::args::RequestArgs;
-use crate::error::Result;
 use bytes::Bytes;
+use color_eyre::eyre::{Report, Result, WrapErr};
 use foundations::telemetry::log;
 use http_body_util::combinators::BoxBody;
 use hyper::HeaderMap;
 
-type Body = BoxBody<Bytes, hyper::Error>;
+type Body = BoxBody<Bytes, Report>;
 
 pub enum HttpClientKind {
     OHttp(OHttpClient),
@@ -26,8 +26,14 @@ pub trait HttpClient {
 impl HttpClient for HttpClientKind {
     async fn send_request(&self, req: RequestArgs) -> Result<HttpResponse> {
         match self {
-            Self::OHttp(c) => c.send_request(req).await,
-            Self::Http2(c) => c.send_request(req).await,
+            Self::OHttp(c) => c
+                .send_request(req)
+                .await
+                .wrap_err("OHTTP Client failed to send request"),
+            Self::Http2(c) => c
+                .send_request(req)
+                .await
+                .wrap_err("HTTP/2 Client failed to send request"),
         }
     }
 }
