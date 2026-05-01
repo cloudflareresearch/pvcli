@@ -8,6 +8,8 @@ use http::Request;
 use http::request::Builder;
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 
+pub const REQUEST_TIMEOUT_SECONDS: u64 = 10;
+
 /**
  * This is a utility struct to help build requests for HTTP/2 and HTTP/3 clients, as much of their
  * request-building logic is shared.

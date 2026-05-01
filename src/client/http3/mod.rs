@@ -3,8 +3,10 @@ pub mod connection;
 pub mod logging;
 
 use super::{HttpBody, HttpClient, HttpResponse, RequestHandler, log_and_execute_request};
-use crate::args::RequestArgs;
+use crate::args::{RequestArgs, TlsConfig};
+use crate::client::cert::X509ConnectionHook;
 use crate::client::http3::logging::H3ConnectionLogger;
+use crate::client::request::REQUEST_TIMEOUT_SECONDS;
 
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -16,10 +18,12 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_quiche::http3::settings::Http3Settings;
-use tokio_quiche::quic::{self, ConnectionShutdownBehaviour};
+use tokio_quiche::quic::{self, ConnectionHook, ConnectionShutdownBehaviour};
 use tokio_quiche::quiche::{ConnectionId, WireErrorCode};
-use tokio_quiche::settings::{self};
-use tokio_quiche::{ClientH3Connection, ClientH3Driver, ConnectionParams};
+use tokio_quiche::settings::{
+    CertificateKind, ConnectionParams, Hooks, QuicSettings, TlsCertificatePaths,
+};
+use tokio_quiche::{ClientH3Connection, ClientH3Driver};
 use url::Url;
 
 #[derive(Clone)]
@@ -39,17 +43,31 @@ impl HttpClient for Http3Client {
 }
 
 impl Http3Client {
-    pub async fn new(peer: String) -> Result<Self> {
+    pub async fn new(peer: String, tls_config: &TlsConfig<'_>) -> Result<Self> {
         let peer_url = Url::parse(&peer)?;
 
-        let settings = settings::QuicSettings::default();
-        // settings.verify_peer = true; // insecure by default TODO: make this configurable
-        let params = ConnectionParams::new_client(
-            settings,
-            None, // No mTLS yet
-            settings::Hooks::default(),
-        );
-        log::debug!("Http3Client connection params: {:?}", params);
+        // Setup TLS configuration
+        let (dummy_tls, connection_hook) = if !tls_config.is_empty() {
+            let tls = TlsCertificatePaths {
+                cert: "",
+                private_key: "",
+                kind: CertificateKind::X509,
+            };
+            let hook = Arc::new(X509ConnectionHook {
+                cacert: tls_config.cacert.map(|s| s.to_string()),
+                client: tls_config.client.map(|s| s.to_string()),
+                key: tls_config.key.map(|s| s.to_string()),
+            }) as Arc<dyn ConnectionHook + Send + Sync>;
+            (Some(tls), Some(hook))
+        } else {
+            (None, None)
+        };
+        let hooks = Hooks { connection_hook };
+
+        let mut settings = QuicSettings::default();
+        settings.verify_peer = true;
+        settings.handshake_timeout = Some(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS));
+        let params: ConnectionParams<'_> = ConnectionParams::new_client(settings, dummy_tls, hooks);
         let client = Http3Client::start_connection(&peer_url, params)
             .await
             .wrap_err(format!(
@@ -91,9 +109,21 @@ impl Http3Client {
         let client = {
             let host = url.host_str();
             let (h3_driver, h3_driver_channel) = ClientH3Driver::new(Http3Settings::default());
+            log::info!(
+                "Starting QUIC connection to {}, {}.",
+                url,
+                if let Some(timeout) = params.settings.handshake_timeout {
+                    format!("timeout in {} seconds", timeout.as_secs())
+                } else {
+                    "No timeout configured".to_string()
+                }
+            );
+            log::debug!("Using QUIC connection parameters: {:?}", params);
             let quic_connection = quic::connect_with_config(socket, host, &params, h3_driver)
                 .await
-                .map_err(|e| eyre!("Failed to connect with QUIC: {e}"))?;
+                .map_err(|e| {
+                    eyre!("Failed to connect with QUIC. Are you missing certificates? {e}")
+                })?;
 
             let h3_over_quic = ClientH3Connection::new(quic_connection, h3_driver_channel);
             connection::Connection::new_with_connection(h3_over_quic)

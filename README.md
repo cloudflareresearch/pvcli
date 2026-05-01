@@ -38,6 +38,12 @@ rbi=off
 kex=X25519MLKEM768
 ```
 
+### Basic HTTP3 query
+
+```
+$ cargo run -- --http3 https://cloudflare.com/cdn-cgi/trace
+```
+
 ### OHTTP request through a relay and gateway
 ```
 $ cargo run -- -vvv --ohttp \
@@ -73,7 +79,18 @@ rbi=off
 kex=X25519MLKEM768
 ```
 
-# Credit
+### OHTTP with HTTP/3 proxy transport
+
+Use `--proxy-http3` to send the outer OHTTP request over HTTP/3 instead of HTTP/2:
+
+```
+$ cargo run -- --ohttp --proxy-http3 -x https://your-h3-gateway https://example.com
+```
+
+# Notes
+Running ferret on mac may warn ```<jemalloc>: option background_thread currently supports pthread only```, but this memory cleanup overhead doesn't really affect ferret's short-lived processes.
+
+# Credits
 - We utilize packages from ohttp-gateway-worker for much of the OHTTP client. Thank you to Akshat Mahajan (@akshat) for the ohttp-gateway-worker crates! (Based on commit: 1e5a05acb87833170063e2a4a06c957da14650fb)
 - We utilize packages from chaussette at src/client/http3/ for much of the HTTP3 client. Thank you to the team for these crates! (Based on commit: 35472d736b5695a933ee8c20af959506abc8922b)
 

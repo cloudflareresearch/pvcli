@@ -1,7 +1,8 @@
-use super::{HttpClient, HttpResponse, RequestHandler, log_and_execute_request};
+use super::{HttpClient, HttpResponse, RequestHandler};
 use crate::{
-    Http2Client,
+    Http2Client, Http3Client,
     args::{Method, RequestArgs, TlsConfig},
+    client::ProxyClientKind,
     error::FerretError,
 };
 
@@ -21,7 +22,7 @@ const MESSAGE_BHTTP_REQUEST: &str = "message/bhttp request";
 const MESSAGE_BHTTP_RESPONSE: &str = "message/bhttp response";
 
 pub struct OHttpClient {
-    proxy_http_client: Http2Client,
+    proxy_http_client: ProxyClientKind,
     proxy_config_url: String,
     proxy_gateway_url: String,
     first_hop_url: Option<String>,
@@ -51,13 +52,15 @@ impl HttpClient for OHttpClient {
 }
 
 impl OHttpClient {
-    pub fn new(
+    pub async fn new(
+        proxy_http3: bool,
         proxy_url: Option<String>,
         gateway_path: String,
         config_path: String,
         first_hop_url: Option<String>,
-        proxy_tls_config: &TlsConfig,
+        proxy_tls_config: &TlsConfig<'_>,
     ) -> Result<Self> {
+        log::info!("Initializing OHTTP Client");
         let Some(proxy_url) = proxy_url else {
             return Err(eyre!("No proxy url (--proxy, -x) provided for ohttp"));
         };
@@ -73,8 +76,25 @@ impl OHttpClient {
         log::debug!("Constructed OHTTP gateway URL: {}", gateway_url);
         log::debug!("Constructed OHTTP config URL: {}", key_config_url);
 
+        let proxy_http_client: ProxyClientKind = if proxy_http3 {
+            log::info!("Using HTTP/3 client for OHTTP proxy communication");
+            ProxyClientKind::Http3(
+                Http3Client::new(proxy_url.to_string(), proxy_tls_config)
+                    .await
+                    .wrap_err("Failed to initialize HTTP/3 client for OHTTP proxy")?,
+            )
+        } else {
+            log::info!("Using HTTP/2 client for OHTTP proxy communication");
+            ProxyClientKind::Http2(
+                Http2Client::new(proxy_tls_config)
+                    .wrap_err("Failed to initialize HTTP/2 client for OHTTP proxy")?,
+            )
+        };
+
+        log::info!("Successfully initialized OHTTP Client");
+
         Ok(Self {
-            proxy_http_client: Http2Client::new(proxy_tls_config)?,
+            proxy_http_client,
             proxy_config_url: key_config_url,
             proxy_gateway_url: gateway_url,
             first_hop_url: first_hop_url,
@@ -159,18 +179,18 @@ impl OHttpClient {
             }
         };
 
-        let outer_request = RequestHandler::create_request(RequestArgs {
+        let outer_request = RequestArgs {
             method: Method::Post,
             url: proxy_url,
             headers: vec!["Content-Type: message/ohttp-req".to_string()],
             body: Some(encrypted_request),
-        })
-        .wrap_err("Failed to create outer OHTTP request with encapsulated inner request")?;
+        };
 
-        let response =
-            log_and_execute_request(outer_request, |req| self.proxy_http_client.execute(req))
-                .await
-                .wrap_err("Failed to execute outer OHTTP request")?;
+        let response = self
+            .proxy_http_client
+            .send_request(outer_request)
+            .await
+            .wrap_err("Failed to execute outer OHTTP request")?;
 
         log::info!(
             "Received response to outer request with status: {}",
@@ -261,7 +281,7 @@ impl OHttpClient {
                 return Err(FerretError::UnexpectedStatus {
                     status: response.status,
                     message: format!(
-                        "OHTTP Gateway returned error, try disabling WARP and try again: {}",
+                        "OHTTP Gateway returned error, try disabling WARP or use a different wifi network and try again: {}",
                         response.body_as_string_escaped()
                     ),
                 })?;
@@ -339,12 +359,14 @@ mod unit_tests {
             .expect("Invalid args in unit test; they should be valid");
 
         let ohttp_client = OHttpClient::new(
+            args.proxy_http3,
             args.proxy.clone(),
             args.gateway_path.clone(),
             args.config_path.clone(),
             args.first_hop.clone(),
             &args.proxy_tls_config(),
         )
+        .await
         .expect("Failed to create OHTTP client with provided proxy URL");
         let result = ohttp_client.fetch_proxy_key().await;
 

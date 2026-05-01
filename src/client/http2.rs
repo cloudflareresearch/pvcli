@@ -52,7 +52,7 @@ impl Http2Client {
             // .http2_only(true) // TODO: --http2 flag to force this
             .build(https);
 
-        log::debug!("Successfully initialized HTTP/2 Client");
+        log::info!("Successfully initialized HTTP/2 Client");
         Ok(Self { client })
     }
 

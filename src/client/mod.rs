@@ -4,6 +4,7 @@ mod http3;
 mod ohttp;
 mod request;
 
+use http::Request;
 pub use http2::Http2Client;
 pub use http3::Http3Client;
 pub use ohttp::OHttpClient;
@@ -13,7 +14,6 @@ use crate::args::RequestArgs;
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr};
 use foundations::telemetry::log;
-use http::Request;
 use http_body_util::combinators::BoxBody;
 use hyper::HeaderMap;
 
@@ -37,6 +37,26 @@ impl HttpClient for HttpClientKind {
                 .send_request(req)
                 .await
                 .wrap_err("OHTTP Client failed to send request"),
+            Self::Http2(c) => c
+                .send_request(req)
+                .await
+                .wrap_err("HTTP/2 Client failed to send request"),
+            Self::Http3(c) => c
+                .send_request(req)
+                .await
+                .wrap_err("HTTP/3 Client failed to send request"),
+        }
+    }
+}
+
+pub enum ProxyClientKind {
+    Http2(Http2Client),
+    Http3(Http3Client),
+}
+
+impl HttpClient for ProxyClientKind {
+    async fn send_request(&self, req: RequestArgs) -> Result<HttpResponse> {
+        match self {
             Self::Http2(c) => c
                 .send_request(req)
                 .await

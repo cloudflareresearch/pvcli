@@ -41,25 +41,28 @@ pub async fn run_handle_error(args: Args) -> String {
     }
 }
 
-pub async fn run(mut args: Args) -> Result<String> {
+pub async fn run(args: Args) -> Result<String> {
+    Ok(raw_run(args).await?.body_as_string_lossy())
+}
+
+pub async fn raw_run(mut args: Args) -> Result<HttpResponse> {
     args.validate()?;
     let client = select_http_client(&args).await?;
-    Ok(client
-        .send_request(args.try_into()?)
-        .await?
-        .body_as_string_lossy())
+    client.send_request(args.try_into()?).await
 }
 
 async fn select_http_client(args: &Args) -> Result<HttpClientKind> {
     if args.ohttp {
         return Ok(HttpClientKind::OHttp(
             OHttpClient::new(
+                args.proxy_http3,
                 args.proxy.clone(),
                 args.gateway_path.clone(),
                 args.config_path.clone(),
                 args.first_hop.clone(),
                 &args.proxy_tls_config(),
             )
+            .await
             .wrap_err("OHTTP Client initialization error")?,
         ));
     }
@@ -70,7 +73,7 @@ async fn select_http_client(args: &Args) -> Result<HttpClientKind> {
 
     if args.http3 {
         return Ok(HttpClientKind::Http3(
-            Http3Client::new(args.url.clone())
+            Http3Client::new(args.url.clone(), &args.tls_config())
                 .await
                 .wrap_err("HTTP/3 Client initialization error")?,
         ));
@@ -120,14 +123,15 @@ mod unit_tests {
     #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "user-agent" ; "ohttp without header")]
     #[test_case(&["ferret", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
     #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com"], false, "support http3" ; "http3 with proxy requires proxy-http3")]
+    #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "http3 with proxy has proxy-http3")]
+    #[test_case(&["ferret", "https://test_url.com", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "http3 proxy allows http2")]
     fn test_args_validation(case: &[&str], expect_pass: bool, expected_contain: &str) {
         let mut args = Args::parse_from(case);
         let result = args.validate();
 
         if expect_pass {
             assert!(result.is_ok(), "result should be Ok()");
-            let all_fields =
-                format!("{:?} {:?} {:?}", args.method, args.header, args.data).to_lowercase();
+            let all_fields = format!("{:?}", args).to_lowercase();
             assert!(
                 all_fields.contains(expected_contain),
                 "expected fields {:?} to contain '{}'",

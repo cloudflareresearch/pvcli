@@ -16,6 +16,12 @@ pub struct TlsConfig<'a> {
     pub key: Option<&'a str>,
 }
 
+impl TlsConfig<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.cacert.is_none() && self.client.is_none() && self.key.is_none()
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "ferret", about = "A curl-like client for privacy protocols")]
 #[command(next_line_help = true)]
@@ -57,7 +63,7 @@ pub struct Args {
 
     /// Use http3 for the request instead of the default http2.
     /// If used with --proxy, only the inner request will be http3.
-    /// This requires the outer request to be http3 as well, specified with [TODO] --proxy-http3.
+    /// This requires the outer request to be http3 as well, specified with --proxy-http3.
     #[arg(long)]
     pub http3: bool,
 
@@ -94,6 +100,9 @@ pub struct Args {
     /// relay URL for OHTTP, if different from proxy URL
     #[arg(long, requires = "proxy")]
     pub first_hop: Option<String>,
+
+    #[arg(long, requires = "proxy")]
+    pub proxy_http3: bool,
 }
 
 impl Default for Args {
@@ -117,6 +126,7 @@ impl Default for Args {
             proxy_cacert: None,
             proxy_client: None,
             proxy_key: None,
+            proxy_http3: false,
         }
     }
 }
@@ -215,7 +225,7 @@ impl Args {
         let warnings: Vec<(String, bool)> = vec![
             (
                 "--proxy paired with --http3 requires --proxy-http3 as we need the outer protocol to support http3 if the inner request is http3".to_string(),
-                self.http3 && self.proxy.is_some(),
+                self.http3 && self.proxy.is_some() && !self.proxy_http3,
             )
         ];
         Ok(warnings)
