@@ -50,6 +50,7 @@ fn select_http_client(args: &Args) -> Result<HttpClientKind> {
             args.proxy.clone(),
             args.gateway_path.clone(),
             args.config_path.clone(),
+            args.first_hop.clone(),
             &args.proxy_tls_config(),
         )?))
     } else if let Some(_proxy_url) = &args.proxy {

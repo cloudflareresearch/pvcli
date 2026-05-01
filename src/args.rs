@@ -62,6 +62,10 @@ pub struct Args {
     /// boolean flag to use ohttp, requires a proxy (see --proxy)
     #[arg(short, long, requires = "proxy")]
     pub ohttp: bool,
+
+    /// relay URL for OHTTP, if different from proxy URL
+    #[arg(long, requires = "ohttp")]
+    pub first_hop: Option<String>,
 }
 
 impl Default for Args {
@@ -78,6 +82,7 @@ impl Default for Args {
             gateway_path: "gateway".to_string(),
             config_path: "ohttp-config".to_string(),
             ohttp: false,
+            first_hop: None,
             proxy_cacert: None,
         }
     }
@@ -121,15 +126,15 @@ impl Args {
     }
 
     fn setup_args(&mut self) -> Result<()> {
-        if !self
-            .header
-            .iter()
-            .any(|h| h.to_ascii_lowercase().contains("user-agent"))
-        {
+        if !self.contains(&self.header, "user-agent") {
             let user_agent_header = format!(
                 "User-Agent:{}/{}",
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
+            );
+            log::debug!(
+                "Header (-H, --header) does not contain \"User-Agent\", defaulting to {}",
+                user_agent_header,
             );
             self.header.push(user_agent_header);
         }
@@ -142,12 +147,7 @@ impl Args {
         self.method = Some(method);
 
         // Standard content types for different types of requests
-        if method == Method::Post
-            && !self
-                .header
-                .iter()
-                .any(|h| h.to_ascii_lowercase().contains("content-type"))
-        {
+        if method == Method::Post && !self.contains(&self.header, "content-type") {
             let default_content_type = "Content-Type:application/x-www-form-urlencoded".to_string();
             log::debug!(
                 "Header (-H, --header) does not contain \"Content-Type\", defaulting to {}",
@@ -189,6 +189,13 @@ impl Args {
             ),
         ];
         Ok(warnings)
+    }
+
+    fn contains(&self, vec: &[String], key: &str) -> bool {
+        vec.iter().any(|h| {
+            h.to_ascii_lowercase()
+                .contains(key.to_ascii_lowercase().as_str())
+        })
     }
 }
 

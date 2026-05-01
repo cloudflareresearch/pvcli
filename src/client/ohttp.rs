@@ -22,6 +22,7 @@ pub struct OHttpClient {
     proxy_http_client: Http2Client,
     proxy_config_url: String,
     proxy_gateway_url: String,
+    first_hop_url: Option<String>,
 }
 
 impl HttpClient for OHttpClient {
@@ -41,6 +42,7 @@ impl OHttpClient {
         proxy_url: Option<String>,
         gateway_path: String,
         config_path: String,
+        first_hop_url: Option<String>,
         proxy_tls_config: &TlsConfig,
     ) -> Result<Self> {
         let Some(proxy_url) = proxy_url else {
@@ -64,6 +66,7 @@ impl OHttpClient {
             proxy_http_client: Http2Client::new(proxy_tls_config)?,
             proxy_config_url: key_config_url,
             proxy_gateway_url: gateway_url,
+            first_hop_url: first_hop_url,
         })
     }
 
@@ -123,14 +126,24 @@ impl OHttpClient {
     }
 
     async fn dispatch_outer_request(&self, encrypted_request: Bytes) -> Result<HttpResponse> {
-        log::info!(
-            "Sending encapsulated request to gateway: {}",
-            self.proxy_gateway_url
-        );
+        log::info!("Sending encapsulated OHTTP request");
+        let proxy_url = match &self.first_hop_url {
+            Some(first_hop) => {
+                log::info!("Using first hop URL to send outer request: {}", first_hop);
+                first_hop.clone()
+            }
+            None => {
+                log::info!(
+                    "No first hop URL provided, using proxy gateway URL for outer request: {}",
+                    self.proxy_gateway_url
+                );
+                self.proxy_gateway_url.clone()
+            }
+        };
 
         let outer_request = self.proxy_http_client.create_request(RequestArgs {
             method: Method::Post,
-            url: self.proxy_gateway_url.clone(),
+            url: proxy_url,
             headers: vec!["Content-Type: message/ohttp-req".to_string()],
             body: Some(encrypted_request),
         })?;
@@ -199,15 +212,24 @@ impl OHttpClient {
         response_receiving_ctx: ResponseReceivingContext,
     ) -> Result<HttpResponse> {
         log::info!("Decrypting OHTTP response, use -vvv to debug raw bytes at each step");
-        if response.status != 200 {
-            return Err(FerretError::UnexpectedStatus {
-                status: response.status,
-                message: format!(
-                    "Gateway returned error status {}: {}",
-                    response.status,
-                    response.body_as_string_escaped()
-                ),
-            });
+        match response.status {
+            200 => {}
+            526 => {
+                return Err(FerretError::OhttpError(format!(
+                    "Gateway returned error status {}. Try disabling WARP and try again",
+                    response.status
+                )));
+            }
+            _ => {
+                return Err(FerretError::UnexpectedStatus {
+                    status: response.status,
+                    message: format!(
+                        "Gateway returned error status {}: {}",
+                        response.status,
+                        response.body_as_string_escaped()
+                    ),
+                });
+            }
         }
 
         log::trace!("Decapsulating response");
@@ -215,7 +237,13 @@ impl OHttpClient {
 
         let decrypted_bhttp = response_receiving_ctx
             .decapsulate_non_chunked_content(&mut response_buf)
-            .await?;
+            .await
+            .map_err(|e| {
+                FerretError::OhttpError(format!(
+                    "Failed to decrypt response: {}. This may indicate the relay forwarded to a different gateway than specified by -x",
+                    e
+                ))
+            })?;
 
         log::trace!(
             "Decrypted BHTTP ({} bytes) [HEX]: {}",
@@ -272,6 +300,7 @@ mod unit_tests {
             args.proxy.clone(),
             args.gateway_path.clone(),
             args.config_path.clone(),
+            args.first_hop.clone(),
             &args.proxy_tls_config(),
         )
         .expect("Failed to create OHTTP client with provided proxy URL");
