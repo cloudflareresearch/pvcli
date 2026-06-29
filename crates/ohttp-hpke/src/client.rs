@@ -32,7 +32,12 @@ where
         let encoded_len = stream_buf.decode_u16().await?;
         let encoded = stream_buf.read_exact(encoded_len as usize).await?;
 
-        key_configs.push(KeyConfig::decode(&encoded)?);
+        // Skip key configs we can't decode (e.g. unsupported KEM ids such as
+        // ML-KEM-768) instead of failing the entire config parse. As long as at
+        // least one supported key config remains, we can still proceed.
+        if let Ok(key_config) = KeyConfig::decode(&encoded) {
+            key_configs.push(key_config);
+        }
     }
 
     if key_configs.is_empty() {
