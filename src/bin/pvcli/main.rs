@@ -1,4 +1,4 @@
-use ferret::tunnel;
+use pvcli::tunnel;
 
 #[tokio::main]
 async fn main() {

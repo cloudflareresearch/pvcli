@@ -55,7 +55,7 @@ h2 = "0.4.7"
 tokio-quiche = "0.16.0"
 tokio-util = { version = "0.7.13", features = ["io"] }
 
-# Ferret dependencies
+# pvcli dependencies
 boring = { version = "4.19.*" }
 boring-sys = { version = "4.19.*" }
 clap = { version = "4", features = ["derive"] }
@@ -85,7 +85,7 @@ ohttp-hpke = { path = "./crates/ohttp-hpke" }
 hyper-binary = { path = "./crates/hyper-binary" }
 
 [package]
-name = "ferret"
+name = "pvcli"
 version = "0.1.0"
 edition = "2024"
 authors = ["Hannah Wang <hwang@cloudflare.com>"]

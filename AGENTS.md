@@ -1,13 +1,13 @@
-# AGENTS.md — ferret
+# AGENTS.md — pvcli
 
 A curl-like client for OHTTP, supporting GET and POST requests over HTTP/2 and HTTP/3 with TLS.
 
 ## STRUCTURE
 ```
-ferret/
+pvcli/
 ├── src/
 │   ├── bin/
-│   │   └── ferret/
+│   │   └── pvcli/
 │   │       └── main.rs         # Binary entry point (calls tunnel())
 │   ├── client/
 │   │   ├── mod.rs              # HttpClient trait, HttpClientKind enum, HttpResponse struct
@@ -21,7 +21,7 @@ ferret/
 │   │   └── request.rs          # RequestHandler trait: shared request building/dispatch logic
 │   ├── lib.rs                  # Core logic: run(), select_http_client(), logging setup
 │   ├── args.rs                 # CLI argument definitions (clap), Args validation
-│   └── error.rs                # FerretError enum (thiserror)
+│   └── error.rs                # PvcliError enum (thiserror)
 ├── crates/                     # Workspace crates
 │   ├── hyper-binary/           # BHTTP encoding/decoding
 │   ├── ohttp-hpke/             # OHTTP HPKE client implementation
@@ -96,7 +96,7 @@ ferret/
 | `redact_args` | fn | `src/client/mod.rs` | Returns a clone of `Args` with sensitive headers redacted |
 | `redact_request_args` | fn | `src/client/mod.rs` | Returns a clone of `RequestArgs` with sensitive headers redacted |
 | `redact_h3_headers` | fn | `src/client/http3/connection.rs` | Redacts `authorization`-family H3 header values for logging |
-| `FerretError` | enum | `src/error.rs` | Error variants; implements `thiserror::Error` |
+| `PvcliError` | enum | `src/error.rs` | Error variants; implements `thiserror::Error` |
 ## CONVENTIONS
 - **Header format**: Headers are `"Key:Value"` strings (colon-separated). See `consume_headers`.
 - **HTTP/2 default**: Use `--http3` flag for QUIC/H3 transport.
@@ -112,15 +112,15 @@ cargo build                                      # build all
 cargo test                                       # run unit tests
 cargo test --test integration_tests              # run integration tests
 cargo test -- --nocapture                        # tests with stdout visible
-cargo run --bin ferret -- <url>                  # HTTP/2 request
-cargo run --bin ferret -- --http3 <url>          # HTTP/3 request
-cargo run --bin ferret -- --ohttp -x <proxy> <url>  # OHTTP request
+cargo run --bin pvcli -- <url>                  # HTTP/2 request
+cargo run --bin pvcli -- --http3 <url>          # HTTP/3 request
+cargo run --bin pvcli -- --ohttp -x <proxy> <url>  # OHTTP request
 ```
 
 ## ANTI-PATTERNS
 - NEVER use println! for diagnostic output — use foundations::telemetry::log macros; println! is reserved for the response body output in tunnel().
 - NEVER skip Args::validate() — arg validation is required before send_request; skipping it can pass None as method.
-- NEVER use .unwrap() in library code — add appropriate FerretError variants and propagate with ?.
+- NEVER use .unwrap() in library code — add appropriate PvcliError variants and propagate with ?.
 - NEVER mix anyhow and eyre — use color_eyre exclusively
 
 ## NOTES

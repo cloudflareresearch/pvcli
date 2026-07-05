@@ -3,7 +3,7 @@ use crate::{
     Http2Client, Http3Client,
     args::{Method, RequestArgs, TlsConfig},
     client::{TransportClientKind, redact_request_args},
-    error::FerretError,
+    error::PvcliError,
 };
 
 use bytes::Bytes;
@@ -143,7 +143,7 @@ impl OHttpClient {
             response.body_as_string_escaped()
         );
         if response.status != 200 {
-            return Err(FerretError::UnexpectedStatus {
+            return Err(PvcliError::UnexpectedStatus {
                 status: response.status,
                 message: format!(
                     "Fetching OHTTP gateway key at {} returned error {}, use -vvv to debug raw response body",
@@ -241,7 +241,7 @@ impl OHttpClient {
             MESSAGE_BHTTP_REQUEST,
             MESSAGE_BHTTP_RESPONSE,
         )
-        .map_err(|e| FerretError::HpkeError(format!("{:?}", e)))
+        .map_err(|e| PvcliError::HpkeError(format!("{:?}", e)))
         .wrap_err("Failed to set up request encapsulation, use -vvv to debug raw bytes")?;
         log::info!("[ENCRYPT] Use key config to set encapsulation context");
 
@@ -309,7 +309,7 @@ impl OHttpClient {
         match response.status {
             200 => {}
             526 => {
-                return Err(FerretError::UnexpectedStatus {
+                return Err(PvcliError::UnexpectedStatus {
                     status: response.status,
                     message: format!(
                         "OHTTP Gateway returned error, try disabling WARP or use a different wifi network and try again: {}",
@@ -318,7 +318,7 @@ impl OHttpClient {
                 })?;
             }
             403 => {
-                return Err(FerretError::UnexpectedStatus {
+                return Err(PvcliError::UnexpectedStatus {
                     status: response.status,
                     message: format!(
                         "OHTTP Gateway returned error, check if the endpoint is a relay with a path: {}",
@@ -327,7 +327,7 @@ impl OHttpClient {
                 })?;
             }
             _ => {
-                return Err(FerretError::UnexpectedStatus {
+                return Err(PvcliError::UnexpectedStatus {
                     status: response.status,
                     message: format!(
                         "OHTTP Gateway returned error: {}",

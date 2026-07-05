@@ -1,4 +1,4 @@
-# ferret
+# pvcli
 
 A curl-like HTTP/2 and HTTP/3 client for OHTTP, supporting GET and POST requests with TLS.
 
@@ -104,7 +104,7 @@ $ cargo run -- --ohttp --proxy-http3 -x https://your-h3-gateway https://example.
 ```
 
 # Notes
-Running ferret on mac may warn ```<jemalloc>: option background_thread currently supports pthread only```, but this memory cleanup overhead doesn't really affect ferret's short-lived processes.
+Running pvcli on mac may warn ```<jemalloc>: option background_thread currently supports pthread only```, but this memory cleanup overhead doesn't really affect pvcli's short-lived processes.
 
 # Credits
 - We utilize packages from ohttp-gateway-worker for much of the OHTTP client. Thank you to Akshat Mahajan (@akshat) for the ohttp-gateway-worker crates! (Based on commit: 1e5a05acb87833170063e2a4a06c957da14650fb)

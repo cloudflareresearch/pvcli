@@ -1171,48 +1171,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
-name = "ferret"
-version = "0.1.0"
-dependencies = [
- "axum",
- "boring",
- "boring-sys",
- "bytes",
- "clap",
- "color-eyre",
- "foundations 5.4.0",
- "futures",
- "futures-util",
- "h2",
- "hex",
- "hpke",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "httpmock",
- "hyper 1.9.0",
- "hyper-binary",
- "hyper-boring",
- "hyper-rustls",
- "hyper-util",
- "ohttp-hpke",
- "rustls",
- "rustls-native-certs",
- "rustls-pemfile",
- "stream-buf",
- "stream-octets",
- "test-case",
- "thiserror 1.0.69",
- "tokio",
- "tokio-boring",
- "tokio-quiche",
- "tokio-util",
- "url",
- "webpki-roots",
- "wiremock",
-]
-
-[[package]]
 name = "ff"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3065,6 +3023,48 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "pvcli"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "boring",
+ "boring-sys",
+ "bytes",
+ "clap",
+ "color-eyre",
+ "foundations 5.4.0",
+ "futures",
+ "futures-util",
+ "h2",
+ "hex",
+ "hpke",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "httpmock",
+ "hyper 1.9.0",
+ "hyper-binary",
+ "hyper-boring",
+ "hyper-rustls",
+ "hyper-util",
+ "ohttp-hpke",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "stream-buf",
+ "stream-octets",
+ "test-case",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-boring",
+ "tokio-quiche",
+ "tokio-util",
+ "url",
+ "webpki-roots",
+ "wiremock",
 ]
 
 [[package]]

@@ -20,7 +20,7 @@ pub struct TlsConfig {
 }
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "ferret", about = "A curl-like client for privacy protocols")]
+#[command(name = "pvcli", about = "A curl-like client for privacy protocols")]
 #[command(next_line_help = true)]
 pub struct Args {
     pub url: String,
@@ -41,7 +41,7 @@ pub struct Args {
     #[arg(short = 'H', long)]
     pub header: Vec<String>,
 
-    /// ferret uses "Content-Type: application/x-www-form-urlencoded" by default. See --header to customize
+    /// pvcli uses "Content-Type: application/x-www-form-urlencoded" by default. See --header to customize
     #[arg(short, long, value_parser = parse_data)]
     pub data: Option<String>,
 

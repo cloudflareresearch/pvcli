@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum FerretError {
+pub enum PvcliError {
     // TODO
     #[error("TODO: {0}")]
     Todo(String),
@@ -15,8 +15,8 @@ pub enum FerretError {
     UnexpectedStatus { status: u16, message: String },
 }
 
-impl From<hpke::HpkeError> for FerretError {
+impl From<hpke::HpkeError> for PvcliError {
     fn from(e: hpke::HpkeError) -> Self {
-        FerretError::HpkeError(format!("{:?}", e))
+        PvcliError::HpkeError(format!("{:?}", e))
     }
 }

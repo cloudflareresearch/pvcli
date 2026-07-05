@@ -1,7 +1,7 @@
 mod common;
 
 use common::{ECHO_BODY, MockH2Server, MockRelay, get_mock_gateway};
-use ferret::{Args, Method, run};
+use pvcli::{Args, Method, run};
 use std::sync::LazyLock;
 use test_case::test_case;
 

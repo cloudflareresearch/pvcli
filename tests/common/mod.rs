@@ -1,8 +1,8 @@
 use axum::body::Body;
 use axum::response::Response;
 use axum::{Router, body::Bytes, routing::post};
-use ferret::HttpClient;
-use ferret::{
+use pvcli::HttpClient;
+use pvcli::{
     Http2Client,
     args::{Method, RequestArgs, TlsConfig},
 };

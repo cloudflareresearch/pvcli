@@ -136,16 +136,16 @@ mod unit_tests {
     use clap::Parser;
     use test_case::test_case;
 
-    #[test_case(&["ferret", "https://test_url.com"], true, "get" ; "default get")]
-    #[test_case(&["ferret", "https://test_url.com", "-d", "testdata"], true, "post" ; "default post")]
-    #[test_case(&["ferret", "https://test_url.com", "-d", "@./tests/testdata.txt"], true, "hello world" ; "post data with filepath")]
-    #[test_case(&["ferret", "https://test_url.com", "-X", "post"], false, "" ; "post without data")]
-    #[test_case(&["ferret", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "http2 post without header")]
-    #[test_case(&["ferret", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "user-agent" ; "ohttp without header")]
-    #[test_case(&["ferret", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
-    #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com"], false, "support http3" ; "http3 with proxy requires proxy-http3")]
-    #[test_case(&["ferret", "https://test_url.com", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "proxy-http3 connect is valid but unsupported")]
-    #[test_case(&["ferret", "https://test_url.com", "--http3", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "MASQUE, or proxy-http3 connect with inner http3 is valid but unsupported")]
+    #[test_case(&["pvcli", "https://test_url.com"], true, "get" ; "default get")]
+    #[test_case(&["pvcli", "https://test_url.com", "-d", "testdata"], true, "post" ; "default post")]
+    #[test_case(&["pvcli", "https://test_url.com", "-d", "@./tests/testdata.txt"], true, "hello world" ; "post data with filepath")]
+    #[test_case(&["pvcli", "https://test_url.com", "-X", "post"], false, "" ; "post without data")]
+    #[test_case(&["pvcli", "https://test_url.com", "-X", "post", "-d", "testdata"], true, "content-type" ; "http2 post without header")]
+    #[test_case(&["pvcli", "https://test_url.com", "--ohttp", "-x", "proxyurl.com"], true, "user-agent" ; "ohttp without header")]
+    #[test_case(&["pvcli", "https://test_url.com", "-d", "testdata", "-H", "content-type:json"], true, "json" ; "post with header")]
+    #[test_case(&["pvcli", "https://test_url.com", "--http3", "--proxy", "proxyurl.com"], false, "support http3" ; "http3 with proxy requires proxy-http3")]
+    #[test_case(&["pvcli", "https://test_url.com", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "proxy-http3 connect is valid but unsupported")]
+    #[test_case(&["pvcli", "https://test_url.com", "--http3", "--proxy", "proxyurl.com", "--proxy-http3"], true, "proxy_http3: true" ; "MASQUE, or proxy-http3 connect with inner http3 is valid but unsupported")]
     fn test_args_validation(case: &[&str], expect_pass: bool, expected_contain: &str) {
         let mut args = Args::parse_from(case);
         let result = args.validate();
