@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use crate::config::KemId;
 use bytes::Bytes;
 use hpke::kem::{DhP256HkdfSha256, DhP384HkdfSha384, Kem as KemTrait, X25519HkdfSha256};

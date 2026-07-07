@@ -1,3 +1,9 @@
+> [!WARNING]  
+> This software is experimental and has not been audited. It is provided as is,
+and is not eligible for any bounty program. The underlying protocol is defined
+by the IETF in RFC 9458 and in draft-ietf-ohai-chunked-ohttp-00. Use at your own
+risk.
+
 # pvcli
 
 A curl-like HTTP/2 and HTTP/3 client for OHTTP, supporting GET and POST requests with TLS.
@@ -106,10 +112,19 @@ $ cargo run -- --ohttp --proxy-http3 -x https://your-h3-gateway https://example.
 # Notes
 Running pvcli on mac may warn ```<jemalloc>: option background_thread currently supports pthread only```, but this memory cleanup overhead doesn't really affect pvcli's short-lived processes.
 
-# Credits
-- We utilize packages from ohttp-gateway-worker for much of the OHTTP client. Thank you to Akshat Mahajan (@akshat) for the ohttp-gateway-worker crates! (Based on commit: 1e5a05acb87833170063e2a4a06c957da14650fb)
-- We utilize packages from chaussette at src/client/http3/ for much of the HTTP3 client. Thank you to the team for these crates! (Based on commit: 35472d736b5695a933ee8c20af959506abc8922b)
+# Security Considerations
+
+This software has not been audited. Please use at your sole discretion. With
+this in mind, this repository security relies on the following:
+
+1. RFC 9458, drafts [draft-ietf-ohai-chunked-ohttp-00](https://www.ietf.org/archive/id/draft-ietf-ohai-chunked-ohttp-00.html)
+2. rust dependencies: `hpke`, `boring`, `hyper-boring`, `tokio-quiche`, and `quiche`
+3. cryptography: [RFC 9180 (HPKE)](https://datatracker.ietf.org/doc/rfc9180/) and TLS 1.3.
+
+Limitations
+1. pvcli does not support PQC HPKE (yet!)
+2. some specification are not yet RFC
 
 ## License
 
-This project has the [MIT License](./LICENCE).
+This project has the [Apache License 2.0](./LICENSE).
