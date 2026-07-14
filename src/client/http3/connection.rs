@@ -152,6 +152,12 @@ impl Connection {
             // Received an explicit connection level error.
             H3Event::ConnectionError(err) => QuicResult::Err(Box::new(err)),
 
+            // Received a GOAWAY frame. Return an error so we stop sending new
+            // requests, but existing tunnels continue running.
+            // This matches the behavior of older tokio-quiche versions that
+            // generated an error internally.
+            H3Event::GoAway { .. } => Err(eyre!("goaway").into()),
+
             // If the connection's been shut down, we're done
             H3Event::ConnectionShutdown(_) => QuicResult::Err(Box::new(quiche::Error::Done)),
 
