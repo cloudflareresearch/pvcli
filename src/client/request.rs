@@ -32,6 +32,20 @@ impl RequestHandler {
                 let body = args.body.ok_or(eyre!("POST request requires a body"))?;
                 RequestHandler::build_request("POST", args.url, args.headers, Some(body))
             }
+            Method::Put => {
+                let body = args.body.ok_or(eyre!("PUT request requires a body"))?;
+                RequestHandler::build_request("PUT", args.url, args.headers, Some(body))
+            }
+            Method::Patch => {
+                let body = args.body.ok_or(eyre!("PATCH request requires a body"))?;
+                RequestHandler::build_request("PATCH", args.url, args.headers, Some(body))
+            }
+            Method::Delete => {
+                RequestHandler::build_request("DELETE", args.url, args.headers, args.body)
+            }
+            Method::Head => {
+                RequestHandler::build_request("HEAD", args.url, args.headers, None)
+            }
         }
     }
 
