@@ -61,7 +61,7 @@ boring = { version = "4.19.*" }
 boring-sys = { version = "4.19.*" }
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6.5"
-foundations = { git = "https://github.com/cloudflare/foundations.git", rev = "ff3d380", features = ["platform-common-default"] }
+foundations = { git = "https://github.com/cloudflare/foundations.git", rev = "ff3d380", default-features = false, features = ["settings", "client-telemetry", "testing", "telemetry-server"] }
 hex = "0.4.3"
 hyper-boring = { version = "4.3", features = ["hyper1"] }
 tokio = { version = "1", features = ["full", "macros", "net", "rt"] }
