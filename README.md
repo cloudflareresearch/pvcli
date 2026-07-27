@@ -93,10 +93,6 @@ Use `--proxy-http3` to send the outer OHTTP request over HTTP/3 instead of HTTP/
 $ pvcli --ohttp --proxy-http3 -x https://your-h3-gateway https://example.com
 ```
 
-# Notes
-
-Running pvcli on mac may warn ```<jemalloc>: option background_thread currently supports pthread only```, but this memory cleanup overhead doesn't really affect pvcli's short-lived processes.
-
 # Security Considerations
 
 This software has not been audited. Please use at your sole discretion. With
