@@ -14,6 +14,29 @@ use crate::client::redact_args;
 pub enum Method {
     Get,
     Post,
+    Put,
+    Delete,
+    Patch,
+    Head,
+}
+
+impl Method {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Method::Get => "GET",
+            Method::Post => "POST",
+            Method::Put => "PUT",
+            Method::Delete => "DELETE",
+            Method::Patch => "PATCH",
+            Method::Head => "HEAD",
+        }
+    }
+}
+
+impl std::fmt::Display for Method {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -244,7 +267,9 @@ impl Args {
         self.method = Some(method);
 
         // Standard content types for different types of requests
-        if method == Method::Post && !self.contains(&self.header, "content-type") {
+        if (method == Method::Post || method == Method::Put || method == Method::Patch)
+            && !self.contains(&self.header, "content-type")
+        {
             let default_content_type = "Content-Type:application/x-www-form-urlencoded".to_string();
             log::debug!(
                 "Header (-H, --header) does not contain \"Content-Type\", defaulting to {}",
@@ -263,12 +288,16 @@ impl Args {
                 self.url.is_empty(),
             ),
             (
-                "data argument (-d, --data) provided for GET request".to_string(),
-                self.method == Some(Method::Get) && self.data.is_some(),
+                "data argument (-d, --data) provided for GET or HEAD request".to_string(),
+                (self.method == Some(Method::Get) || self.method == Some(Method::Head))
+                    && self.data.is_some(),
             ),
             (
-                "no data argument (-d, --data) provided for POST request".to_string(),
-                self.method == Some(Method::Post) && self.data.is_none(),
+                "no data argument (-d, --data) provided for POST, PUT, or PATCH request".to_string(),
+                (self.method == Some(Method::Post)
+                    || self.method == Some(Method::Put)
+                    || self.method == Some(Method::Patch))
+                    && self.data.is_none(),
             ),
         ];
         Ok(warnings)
@@ -344,3 +373,55 @@ fn parse_data(d: &str) -> std::result::Result<String, String> {
         Ok(d.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_method_as_str_and_display() {
+        assert_eq!(Method::Get.as_str(), "GET");
+        assert_eq!(Method::Post.as_str(), "POST");
+        assert_eq!(Method::Put.as_str(), "PUT");
+        assert_eq!(Method::Delete.as_str(), "DELETE");
+        assert_eq!(Method::Patch.as_str(), "PATCH");
+        assert_eq!(Method::Head.as_str(), "HEAD");
+
+        assert_eq!(format!("{}", Method::Put), "PUT");
+        assert_eq!(format!("{}", Method::Delete), "DELETE");
+        assert_eq!(format!("{}", Method::Patch), "PATCH");
+        assert_eq!(format!("{}", Method::Head), "HEAD");
+    }
+
+    #[test]
+    fn test_validate_new_methods() {
+        let mut args_put = Args {
+            url: "https://example.com".to_string(),
+            method: Some(Method::Put),
+            data: Some("payload".to_string()),
+            ..Default::default()
+        };
+        assert!(args_put.validate().is_ok());
+        assert!(
+            args_put
+                .header
+                .iter()
+                .any(|h| h.to_lowercase().contains("content-type"))
+        );
+
+        let mut args_delete = Args {
+            url: "https://example.com".to_string(),
+            method: Some(Method::Delete),
+            ..Default::default()
+        };
+        assert!(args_delete.validate().is_ok());
+
+        let mut args_head = Args {
+            url: "https://example.com".to_string(),
+            method: Some(Method::Head),
+            ..Default::default()
+        };
+        assert!(args_head.validate().is_ok());
+    }
+}
+
