@@ -4,7 +4,7 @@
 
 use boring::ssl::{SslContextBuilder, SslFiletype, SslMethod, SslVerifyMode};
 use boring::x509::X509;
-use boring::x509::store::X509StoreBuilder;
+use boring::x509::store::{X509StoreBuilder, X509StoreBuilderRef};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use foundations::telemetry::log;
 use tokio_quiche::quic::ConnectionHook;
@@ -73,6 +73,7 @@ pub fn build_ssl_context_builder(
     } else {
         log::debug!("No custom CA certificate provided, using default system trust store");
         builder.set_default_verify_paths()?;
+        load_native_certs(builder.cert_store_mut());
     }
 
     match (client_path, key_path) {
@@ -91,4 +92,21 @@ pub fn build_ssl_context_builder(
         }
     }
     Ok(())
+}
+
+fn load_native_certs(store: &mut X509StoreBuilderRef) {
+    let native = rustls_native_certs::load_native_certs();
+
+    for err in &native.errors {
+        log::debug!("Failed to load a native CA certificate: {}", err);
+    }
+
+    let added = native
+        .certs
+        .iter()
+        .filter_map(|cert| X509::from_der(cert.as_ref()).ok())
+        .filter(|cert| store.add_cert(cert.clone()).is_ok())
+        .count();
+
+    log::debug!("Loaded {} native CA certificate(s) into trust store", added);
 }
