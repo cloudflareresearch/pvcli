@@ -7,6 +7,7 @@ mod http2;
 mod http3;
 mod ohttp;
 mod request;
+mod resolver;
 
 use http::Request;
 use http_body::Body;
@@ -14,6 +15,7 @@ pub use http2::Http2Client;
 pub use http3::Http3Client;
 pub use ohttp::OHttpClient;
 pub use request::RequestHandler;
+pub use resolver::Resolver;
 
 use http::HeaderValue;
 use std::borrow::Cow;

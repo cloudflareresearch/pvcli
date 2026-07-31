@@ -43,9 +43,7 @@ impl RequestHandler {
             Method::Delete => {
                 RequestHandler::build_request("DELETE", args.url, args.headers, args.body)
             }
-            Method::Head => {
-                RequestHandler::build_request("HEAD", args.url, args.headers, None)
-            }
+            Method::Head => RequestHandler::build_request("HEAD", args.url, args.headers, None),
         }
     }
 

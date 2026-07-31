@@ -7,6 +7,7 @@ pub mod connection;
 
 use super::{HttpBody, HttpClient, HttpResponse, RequestHandler, log_and_execute_request};
 use crate::args::{RequestArgs, TlsConfig};
+use crate::client::Resolver;
 use crate::client::cert::X509ConnectionHook;
 use crate::client::request::REQUEST_TIMEOUT_SECONDS;
 
@@ -31,6 +32,7 @@ use url::Url;
 #[derive(Clone)]
 pub struct Http3Client {
     quic_settings: QuicSettings,
+    resolver: Resolver,
 }
 
 struct Http3Connection {
@@ -68,7 +70,7 @@ impl HttpClient for Http3Client {
 }
 
 impl Http3Client {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(resolver: &Resolver) -> Result<Self> {
         let mut settings = QuicSettings::default();
         settings.verify_peer = true;
         settings.handshake_timeout = Some(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS));
@@ -79,6 +81,7 @@ impl Http3Client {
 
         Ok(Self {
             quic_settings: settings,
+            resolver: resolver.clone(),
         })
     }
 
@@ -91,7 +94,8 @@ impl Http3Client {
         let peer_url = Url::parse(&peer)?;
         let params: ConnectionParams<'_> =
             ConnectionParams::new_client(self.quic_settings.clone(), dummy_tls, hooks.clone());
-        let client = Http3Client::start_connection(&peer_url, params)
+        let client = self
+            .start_connection(&peer_url, params)
             .await
             .wrap_err(format!(
                 "Http3Client failed to start connection to {}",
@@ -123,12 +127,25 @@ impl Http3Client {
         Ok((dummy_tls, hooks))
     }
 
-    async fn start_connection(url: &Url, params: ConnectionParams<'_>) -> Result<Http3Connection> {
-        let peer_addr = url
-            .socket_addrs(|| Some(443))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| eyre!("Failed to resolve peer address from URL: {}", url))?;
+    async fn start_connection(
+        &self,
+        url: &Url,
+        params: ConnectionParams<'_>,
+    ) -> Result<Http3Connection> {
+        let addresses = self
+            .resolver
+            .resolve_url(url)
+            .await
+            .wrap_err_with(|| format!("Failed to resolve peer address for {url}"))?;
+
+        let peer_addr = addresses
+            .first()
+            .ok_or_else(|| eyre!("Resolved {url} to zero addresses"))?;
+
+        log::info!(
+            "Resolved addresses for {url}, choosing {peer_addr}";
+            "addresses" => format!("{addresses:?}")
+        );
 
         let bind_addr = match peer_addr {
             SocketAddr::V4(_) => "0.0.0.0:0",

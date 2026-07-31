@@ -19,7 +19,7 @@ use foundations::{
     },
 };
 
-use crate::args::TlsConfig;
+use crate::{args::TlsConfig, client::Resolver};
 
 pub async fn tunnel() {
     let args = Args::parse();
@@ -58,6 +58,14 @@ pub async fn raw_run(mut args: Args) -> Result<HttpResponse> {
 }
 
 async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> {
+    let resolver = Resolver::new(
+        args.resolve
+            .clone()
+            .into_iter()
+            .map(|resolve| ((resolve.host, resolve.port), resolve.addresses))
+            .collect(),
+    );
+
     if args.ohttp {
         return Ok((
             HttpClientKind::OHttp(
@@ -71,6 +79,7 @@ async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> 
                     args.first_hop.clone(),
                     args.first_hop_header.clone(),
                     &args.first_hop_tls_config(),
+                    &resolver,
                 )
                 .await
                 .wrap_err("OHTTP Client initialization error")?,
@@ -91,14 +100,17 @@ async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> 
             ));
         } else {
             log::info!("[CLIENT] Using HTTP/2 for proxy connection");
-            return Ok((HttpClientKind::Http2(Http2Client {}), args.tls_config()));
+            return Ok((
+                HttpClientKind::Http2(Http2Client::new(&resolver)),
+                args.tls_config(),
+            ));
         }
     }
 
     if args.http3 {
         return Ok((
             HttpClientKind::Http3(
-                Http3Client::new()
+                Http3Client::new(&resolver)
                     .await
                     .wrap_err("HTTP/3 Client initialization error")?,
             ),
@@ -106,7 +118,10 @@ async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> 
         ));
     }
 
-    Ok((HttpClientKind::Http2(Http2Client {}), args.tls_config()))
+    Ok((
+        HttpClientKind::Http2(Http2Client::new(&resolver)),
+        args.tls_config(),
+    ))
 }
 
 fn configure_logging(args: &Args) -> BootstrapResult<TelemetryDriver> {

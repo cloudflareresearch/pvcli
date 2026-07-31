@@ -18,7 +18,8 @@ pvcli/
 │   │   │   ├── body.rs         # H3Body type for streaming response bodies
 │   │   │   └── connection.rs   # QUIC connection management, SendRequest handle
 │   │   ├── ohttp.rs            # OHttpClient: OHTTP-encrypted requests via proxy (H2 or H3)
-│   │   └── request.rs          # RequestHandler trait: shared request building/dispatch logic
+│   │   ├── request.rs          # RequestHandler trait: shared request building/dispatch logic
+│   │   └── resolver.rs         # Resolver: hostname resolution and resolution overrides
 │   ├── lib.rs                  # Core logic: run(), select_http_client(), logging setup
 │   ├── args.rs                 # CLI argument definitions (clap), Args validation
 │   └── error.rs                # PvcliError enum (thiserror)
@@ -50,6 +51,7 @@ pvcli/
 | Add new error variants | `src/error.rs` |
 | Arg validation logic | `src/args.rs` (`Args::validate`) |
 | Client selection logic | `src/lib.rs` (`select_http_client`) |
+| DNS resolution | `src/client/resolver.rs` |
 | Logging configuration | `src/lib.rs` (`configure_logging`) |
 | Mock server routes | `tests/common/mod.rs` |
 | Integration test cases | `tests/integration_tests.rs` |
@@ -68,6 +70,7 @@ pvcli/
 | `TlsConfig` | struct | `src/args.rs` | TLS configuration holder (cacert path) |
 | `Args::validate` | method | `src/args.rs` | Calls setup_args, validates basic and proxy args |
 | `RequestArgs` | struct | `src/args.rs` | Validated request parameters (method, url, headers, body, `proxy_connect`, `proxy_tls_config`, `proxy_header`) |
+| `ResolveOverride` | struct | `src/args.rs` | `--resolve` value type: `host:port:addr[,addr]...` parsed via `FromStr` |
 | `Method` | enum | `src/args.rs` | `Get` \| `Post` — case-insensitive via clap |
 | `HttpClient` | trait | `src/client/mod.rs` | Trait for `send_request()` — implemented by client types |
 | `HttpClientKind` | enum | `src/client/mod.rs` | `OHttp(OHttpClient)` \| `Http2(Http2Client)` \| `Http3(Http3Client)` |
@@ -91,6 +94,7 @@ pvcli/
 | `H3Body` | struct | `src/client/http3/body.rs` | Streaming body type for H3 responses (impls AsyncRead/AsyncWrite) |
 | `OHttpClient` | struct | `src/client/ohttp.rs` | OHTTP client: fetches key, encrypts, proxies via H2 or H3, decrypts |
 | `CertSettings` | struct | `src/client/cert.rs` | Client cert + key paths for mTLS in `X509ConnectionHook` |
+| `Resolver` | struct | `src/client/resolver.rs` | DNS resolver for resolving URLs and hostnames to addresses, allows manual overrides |
 | `redact_headers` | fn | `src/client/mod.rs` | Redacts `authorization`-family header values in a `HeaderMap` for logging |
 | `redact_headers_vec` | fn | `src/client/mod.rs` | Redacts `authorization`-family headers in `&[String]` `"Key:Value"` form |
 | `redact_args` | fn | `src/client/mod.rs` | Returns a clone of `Args` with sensitive headers redacted |
