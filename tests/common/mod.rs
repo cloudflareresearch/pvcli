@@ -7,11 +7,14 @@ use axum::response::Response;
 use axum::{Router, body::Bytes, routing::post};
 use httpmock::MockServer;
 use pvcli::HttpClient;
+use pvcli::args::ResolveOverride;
 use pvcli::{
     Http2Client,
     args::{Method, RequestArgs, TlsConfig},
 };
 use std::env::var;
+use std::net::SocketAddr;
+use url::Url;
 
 pub const ECHO_BODY: &str = "This is a test body for OHTTP encryption and decryption";
 
@@ -34,6 +37,10 @@ impl MockH2Server {
 
     pub fn url(&self) -> String {
         self.server.base_url()
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.server.address().clone()
     }
 
     fn mock_http2(server: &MockServer) {
@@ -63,7 +70,7 @@ impl MockH2Server {
 }
 
 pub struct MockRelay {
-    addr: String,
+    addr: SocketAddr,
 }
 
 impl MockRelay {
@@ -72,7 +79,7 @@ impl MockRelay {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0") // 0 = random port
             .await
             .unwrap();
-        let addr = listener.local_addr().unwrap().to_string();
+        let addr = listener.local_addr().unwrap();
 
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -81,7 +88,7 @@ impl MockRelay {
         MockRelay { addr }
     }
 
-    pub fn url(&self) -> String {
+    pub fn addr(&self) -> SocketAddr {
         self.addr.clone()
     }
 
@@ -95,7 +102,7 @@ impl MockRelay {
                 .body(Body::from("invalid request to relay"))
                 .unwrap()
         } else {
-            let http_client = Http2Client {};
+            let http_client = Http2Client::default();
             let url = format!("{}/gateway", get_mock_gateway());
             let body = Some(body);
             let args = RequestArgs {
@@ -141,4 +148,20 @@ impl MockRelay {
 
 pub fn get_mock_gateway() -> String {
     var("GATEWAY_URL").unwrap_or_else(|_| "http://localhost:8787".into())
+}
+
+pub fn get_mock_gateway_override(host: &str) -> ResolveOverride {
+    ResolveOverride {
+        host: host.to_owned(),
+        port: 80,
+        addresses: vec![
+            Url::parse(&get_mock_gateway())
+                .expect("mock gateway url must be valid")
+                .socket_addrs(|| Some(80))
+                .expect("mock gateway address must be valid")
+                .into_iter()
+                .next()
+                .expect("mock gateway address is expected to resolve to at least one address"),
+        ],
+    }
 }

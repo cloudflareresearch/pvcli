@@ -6,7 +6,7 @@ use super::{HttpClient, HttpResponse, RequestHandler};
 use crate::{
     Http2Client, Http3Client,
     args::{Method, RequestArgs, TlsConfig},
-    client::{TransportClientKind, redact_request_args},
+    client::{Resolver, TransportClientKind, redact_request_args},
     error::PvcliError,
 };
 
@@ -80,6 +80,7 @@ impl OHttpClient {
         first_hop_url: Option<String>,
         first_hop_headers: Vec<String>,
         first_hop_tls_config: &TlsConfig,
+        resolver: &Resolver,
     ) -> Result<Self> {
         let Some(proxy_url) = proxy_url else {
             return Err(eyre!("No proxy url (--proxy, -x) provided for ohttp"));
@@ -101,13 +102,13 @@ impl OHttpClient {
         let proxy_http_client = if proxy_http3 {
             log::info!("[OHTTP] Using HTTP/3 client for proxy requests");
             TransportClientKind::Http3(
-                Http3Client::new()
+                Http3Client::new(resolver)
                     .await
                     .wrap_err("Failed to initialize HTTP/3 client for OHTTP proxy")?,
             )
         } else {
             log::info!("[OHTTP] Using HTTP/2 client for proxy requests");
-            TransportClientKind::Http2(Http2Client {})
+            TransportClientKind::Http2(Http2Client::new(resolver))
         };
 
         Ok(Self {
@@ -390,7 +391,7 @@ impl OHttpClient {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::{Args, OHttpClient};
+    use crate::{Args, OHttpClient, client::Resolver};
     use httpmock::MockServer;
     use test_case::test_case;
 
@@ -425,6 +426,7 @@ mod unit_tests {
             args.first_hop.clone(),
             args.first_hop_header.clone(),
             &args.first_hop_tls_config(),
+            &Resolver::default(),
         )
         .await
         .expect("Failed to create OHTTP client with provided proxy URL");

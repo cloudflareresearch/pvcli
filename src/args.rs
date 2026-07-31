@@ -6,7 +6,11 @@ use bytes::Bytes;
 use clap::Parser;
 use color_eyre::eyre::{Report, Result, eyre};
 use foundations::telemetry::log;
-use std::fs;
+use std::{
+    fs,
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+};
 
 use crate::client::redact_args;
 
@@ -93,6 +97,12 @@ pub struct Args {
     #[arg(long, conflicts_with = "ohttp")]
     pub http3: bool,
 
+    /// Override DNS resolution by mapping a specific host and port to custom addresses.
+    /// Use "*" as the host to resolve any hostname with the specified port to custom addresses.
+    /// The argument can be specified multiple times. Exact host matches take precedence over wildcards.
+    #[arg(long, value_name = "host:port:addr[,addr]...")]
+    pub resolve: Vec<ResolveOverride>,
+
     /** PROXYING */
     /// url to proxy for CONNECT proxying or OHTTP
     #[arg(short = 'x', long)]
@@ -165,6 +175,7 @@ impl Default for Args {
             client: None,
             key: None,
             http3: false,
+            resolve: vec![],
             proxy: None,
             gateway_path: "gateway".to_string(),
             config_path: "ohttp-config".to_string(),
@@ -293,7 +304,8 @@ impl Args {
                     && self.data.is_some(),
             ),
             (
-                "no data argument (-d, --data) provided for POST, PUT, or PATCH request".to_string(),
+                "no data argument (-d, --data) provided for POST, PUT, or PATCH request"
+                    .to_string(),
                 (self.method == Some(Method::Post)
                     || self.method == Some(Method::Put)
                     || self.method == Some(Method::Patch))
@@ -366,6 +378,52 @@ impl Default for RequestArgs {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolveOverride {
+    pub host: String,
+    pub port: u16,
+    pub addresses: Vec<SocketAddr>,
+}
+
+impl FromStr for ResolveOverride {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.splitn(3, ':');
+        let (Some(host), Some(port), Some(addrs)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(format!("expected HOST:PORT:ADDR[,ADDR]..., got {s:?}"));
+        };
+
+        let port: u16 = port.parse().map_err(|_| format!("invalid port {port:?}"))?;
+
+        let addresses = addrs
+            .split(',')
+            .map(|addr| {
+                let addr = addr.trim();
+                let addr = addr
+                    .strip_prefix('[')
+                    .and_then(|a| a.strip_suffix(']'))
+                    .unwrap_or(addr);
+
+                if addr.is_empty() {
+                    return Err("at least one IP address must be specified".to_string());
+                }
+
+                addr.parse::<IpAddr>()
+                    .map(|ip| SocketAddr::new(ip, port))
+                    .map_err(|_| format!("invalid address {addr:?}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            host: host.to_owned(),
+            port,
+            addresses,
+        })
+    }
+}
+
 fn parse_data(d: &str) -> std::result::Result<String, String> {
     if let Some(path) = d.strip_prefix("@") {
         fs::read_to_string(path).map_err(|e| format!("failed to read file '{}': {}", path, e))
@@ -423,5 +481,50 @@ mod tests {
         };
         assert!(args_head.validate().is_ok());
     }
-}
 
+    #[test]
+    fn test_resolve_override_single_address() {
+        let r: ResolveOverride = "test.internal:443:127.0.0.1".parse().unwrap();
+        assert_eq!(r.host, "test.internal");
+        assert_eq!(r.port, 443);
+        assert_eq!(r.addresses, vec!["127.0.0.1:443".parse().unwrap()]);
+    }
+
+    #[test]
+    fn test_resolve_override_multiple_addresses() {
+        let r: ResolveOverride = "test.internal:8080:127.0.0.1, 10.0.0.1 ,[::1],::2"
+            .parse()
+            .unwrap();
+        assert_eq!(r.port, 8080);
+        assert_eq!(
+            r.addresses,
+            vec![
+                "127.0.0.1:8080".parse().unwrap(),
+                "10.0.0.1:8080".parse().unwrap(),
+                "[::1]:8080".parse::<SocketAddr>().unwrap(),
+                "[::2]:8080".parse::<SocketAddr>().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_resolve_override_invalid() {
+        for input in [
+            "",
+            "test.internal",
+            "test.internal:443",
+            "::",
+            "test.internal:9999999:10.0.0.1",
+            "test.internal:invalid:10.0.0.1",
+            "test.internal:443:invalid",
+        ] {
+            let result = input.parse::<ResolveOverride>();
+            assert!(
+                result.is_err(),
+                "parsing of invalid resolve override should fail: input: {}, result: {:?}",
+                input,
+                result
+            );
+        }
+    }
+}

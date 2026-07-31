@@ -2,14 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::net::SocketAddr;
+
 use super::{
     HttpBody, HttpClient, HttpResponse, RequestHandler, cert::build_ssl_context_builder,
     log_and_execute_request,
 };
 use crate::{
     args::{RequestArgs, TlsConfig},
-    client::redact_headers,
-    client::request::REQUEST_TIMEOUT_SECONDS,
+    client::{redact_headers, request::REQUEST_TIMEOUT_SECONDS, resolver::Resolver},
 };
 
 use boring::ssl::{SslConnector, SslMethod};
@@ -29,7 +30,10 @@ use tokio::{
  * HTTP/2 Client supports both HTTP/1.1 and HTTP/2 via ALPN negotiation during the TLS handshake.
  * If the server does not support HTTP/2, it will gracefully fall back to HTTP/1.1.
  */
-pub struct Http2Client {}
+#[derive(Default)]
+pub struct Http2Client {
+    resolver: Resolver,
+}
 
 impl HttpClient for Http2Client {
     async fn send_request(
@@ -37,7 +41,8 @@ impl HttpClient for Http2Client {
         args: RequestArgs,
         tls_config: &TlsConfig,
     ) -> Result<HttpResponse> {
-        let sender = Http2Client::establish_sender(&args, tls_config)
+        let sender = self
+            .establish_sender(&args, tls_config)
             .await
             .wrap_err("Failed to establish connection and get sender for HTTP/2 request")?;
 
@@ -96,6 +101,12 @@ impl HttpSender {
 }
 
 impl Http2Client {
+    pub fn new(resolver: &Resolver) -> Self {
+        Self {
+            resolver: resolver.clone(),
+        }
+    }
+
     async fn execute_request(
         request: Request<HttpBody>,
         mut sender: HttpSender,
@@ -127,6 +138,7 @@ impl Http2Client {
     }
 
     async fn establish_sender(
+        &self,
         args: &RequestArgs,
         target_tls_config: &TlsConfig,
     ) -> Result<HttpSender> {
@@ -134,9 +146,20 @@ impl Http2Client {
         let tls_config = args.proxy_tls_config.as_ref().unwrap_or(target_tls_config);
         let (scheme, host, port) = Http2Client::url_parts(request_url.clone())?;
         let scheme_str = scheme.as_str().to_uppercase();
-        log::info!( "[TCP HANDSHAKE] Sending connection request"; "url" => request_url.clone());
 
-        let tcp_stream = Http2Client::tcp_connection(request_url.clone()).await?;
+        let addresses = self.resolver.resolve(&host, port).await?;
+        log::info!(
+            "Resolved target addresses";
+            "target" => format!("{host}:{port}"),
+            "addresses" => format!("{addresses:?}")
+        );
+        if addresses.is_empty() {
+            return Err(eyre!("No addresses to connect to"));
+        }
+
+        log::info!("[TCP HANDSHAKE] Sending connection request"; "url" => request_url.clone());
+
+        let tcp_stream = Http2Client::tcp_connection(&addresses).await?;
         log::info!("[TCP HANDSHAKE] Connection established");
 
         log::debug!(
@@ -189,34 +212,24 @@ impl Http2Client {
         Ok(sender)
     }
 
-    async fn tcp_connection(peer: String) -> Result<TcpStream> {
-        let (_scheme, host, port) = Http2Client::url_parts(peer.clone())?;
+    async fn tcp_connection(peer_addresses: &[SocketAddr]) -> Result<TcpStream> {
+        log::debug!("Initiating TCP connection to peer"; "peer_addresses" => format!("{peer_addresses:?}"));
 
-        log::debug!("Initiating TCP connection to peer {}", peer);
         let tcp_stream = timeout(
             std::time::Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
-            tokio::net::TcpStream::connect((host.clone(), port)),
+            tokio::net::TcpStream::connect(peer_addresses),
         )
         .await
         .map_err(|_| {
-            eyre!(
-                "TCP connection to {}:{} timed out after {}s",
-                host,
-                port,
-                REQUEST_TIMEOUT_SECONDS
-            )
+            eyre!("TCP connection to {peer_addresses:?} timed out after {REQUEST_TIMEOUT_SECONDS}s")
         })?
-        .map_err(|e| {
-            eyre!(
-                "Failed to TCP connect to peer ({}) {}:{}: {e}",
-                peer,
-                host,
-                port
-            )
+        .wrap_err_with(|| {
+            format!("Failed to connect to any of the candidate addresses: {peer_addresses:?}")
         })?;
+
         log::info!(
             "Successfully established TCP connection";
-            "peer" => format!("{}:{}", host, port)
+            "peer" => tcp_stream.peer_addr().map_or_else(|_| format!("unknown"), |a| a.to_string())
         );
         Ok(tcp_stream)
     }
