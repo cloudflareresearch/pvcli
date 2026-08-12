@@ -65,6 +65,18 @@ $ pvcli -x https://your-proxy.example.com \
   https://target.example.com
 ```
 
+### Privacy Pass (PAT) authenticated proxying
+
+Use `--pat-issuer` to mint a public Privacy Pass token from an issuer and inject
+it as a `Proxy-Authorization: PrivateToken token=...` header on the CONNECT
+request. This requires `-x/--proxy`; `--ohttp` is not yet implemented:
+
+```
+$ pvcli -x https://your-proxy.example.com \
+  --pat-issuer demo-pat.issuer.cloudflare.com \
+  https://target.example.com
+```
+
 ## Setting up local mock gateway from ohttp-gateway-worker
 
 ```

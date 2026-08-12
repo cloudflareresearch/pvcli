@@ -5,6 +5,7 @@
 pub mod args;
 mod client;
 pub mod error;
+pub mod pat;
 
 pub use args::{Args, Method};
 pub use client::{Http2Client, Http3Client, HttpClient, HttpClientKind, HttpResponse, OHttpClient};
@@ -53,8 +54,31 @@ pub async fn run(args: Args) -> Result<String> {
 
 pub async fn raw_run(mut args: Args) -> Result<HttpResponse> {
     args.validate()?;
+    mint_pat_if_requested(&mut args).await?;
     let (client, tls_config) = select_http_client(&args).await?;
     client.send_request(args.try_into()?, &tls_config).await
+}
+
+async fn mint_pat_if_requested(args: &mut Args) -> Result<()> {
+    let Some(issuer) = args.pat_issuer.as_deref() else {
+        return Ok(());
+    };
+    if args.proxy.is_none() {
+        return Err(eyre!("--pat-issuer requires --proxy"));
+    }
+    if args.ohttp {
+        return Err(eyre!(
+            "--pat-issuer is not yet implemented for --ohttp; it is currently only supported for CONNECT proxying"
+        ));
+    }
+    log::info!("[PAT] minting token from issuer {issuer}");
+    let header_value = pat::request_token(issuer, &args.pat_issuer_directory)
+        .await
+        .wrap_err("failed to mint Privacy Pass token")?;
+    args.proxy_header
+        .push(format!("Proxy-Authorization:{header_value}"));
+    log::debug!("[PAT] injected Proxy-Authorization PrivateToken header");
+    Ok(())
 }
 
 async fn select_http_client(args: &Args) -> Result<(HttpClientKind, TlsConfig)> {
