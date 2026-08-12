@@ -39,6 +39,15 @@ hyper = { version = "1.8.1", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio", "http2"] }
 hyper-rustls = { version = "0.27", features = ["http2"] }
 
+# Privacy Pass token minting (PAT issuer)
+privacypass = "0.2.0-pre.2"
+blind-rsa-signatures = "0.17"
+base64 = "0.22"
+spki = "0.7"
+tls_codec = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 # Crypto dependencies
 aead = "0.5.2"
 generic-array = "=0.14.7"
@@ -96,9 +105,16 @@ publish = false
 [dependencies]
 boring = { workspace = true }
 boring-sys = { workspace = true }
+base64 = { workspace = true }
+blind-rsa-signatures = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true }
 color-eyre = { workspace = true }
+privacypass = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+spki = { workspace = true }
+tls_codec = { workspace = true }
 foundations = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }

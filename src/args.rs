@@ -160,6 +160,18 @@ pub struct Args {
     /// path to key certificate (PEM format) for TLS validation --first-hop.
     #[arg(long, requires = "first_hop", requires = "first_hop_client")]
     pub first_hop_key: Option<String>,
+
+    /// host of a Privacy Pass issuer
+    #[arg(long, requires = "proxy")]
+    pub pat_issuer: Option<String>,
+
+    /// path to the Privacy Pass issuer's token-key directory (RFC 9578).
+    #[arg(
+        long,
+        default_value = "/.well-known/private-token-issuer-directory",
+        requires = "pat_issuer"
+    )]
+    pub pat_issuer_directory: String,
 }
 
 impl Default for Args {
@@ -190,6 +202,8 @@ impl Default for Args {
             first_hop_cacert: None,
             first_hop_client: None,
             first_hop_key: None,
+            pat_issuer: None,
+            pat_issuer_directory: "/.well-known/private-token-issuer-directory".to_string(),
         }
     }
 }
